@@ -807,9 +807,17 @@ void httpHandleOTAatmega328() {
     DBG_PRINT("starting Update: ");
     DBG_FORCE_OUTPUT();
 
+#ifdef _ESPSERIALBRIDGE_SUPPORT
+    espSerialBridge.enableClientConnect(false);
+#endif
+
     FlashATmega328 flashATmega328(2);
 
     flashATmega328.flashFile(&otaFile);
+
+#ifdef _ESPSERIALBRIDGE_SUPPORT
+    espSerialBridge.enableClientConnect();
+#endif
 
     clearOtaFile();
   }
@@ -868,6 +876,7 @@ void httpHandleOTAatmega328Data() {
 }
 
 void httpHandleATMega328() {
+  DBG_PRINT("httpHandleATMega328: ");
   String result = F("<h4>OTA</h4>");
   result += flashAddonForm();
   server.client().setNoDelay(true);

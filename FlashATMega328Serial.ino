@@ -2,17 +2,11 @@
 
 FlashATmega328::FlashATmega328(uint8_t dtrPort) {
   m_dtrPort = dtrPort;
-  pinMode(m_dtrPort, OUTPUT);
-  digitalWrite(m_dtrPort, HIGH);
 }
 
 FlashATmega328::~FlashATmega328() {
-  pinMode(m_dtrPort, INPUT);
-
-  if (m_BaudRateAtReset != -1 && Serial.baudRate() != m_BaudRateAtReset) {
+  if (m_BaudRateAtReset != -1 && Serial.baudRate() != m_BaudRateAtReset)
     setupSerial(m_BaudRateAtReset);
-    readData();
-  }
 }
 
 void FlashATmega328::setupSerial(int baud) {
@@ -26,6 +20,7 @@ void FlashATmega328::setupSerial(int baud) {
 }
 
 bool FlashATmega328::reset() {
+  pinMode(m_dtrPort, OUTPUT);
   digitalWrite(m_dtrPort, LOW);
   delay(1000);
   digitalWrite(m_dtrPort, HIGH);
@@ -116,7 +111,7 @@ int FlashATmega328::writeData(uint8_t *data, size_t dataSize) {
 
 bool FlashATmega328::stkGetSync() {
   unsigned long currMillis = millis();
-  uint8_t sync[2] = { stkRequestGetSync, stkRequestCrcEOP }, retries = 10;
+  uint8_t sync[2] = { stkRequestGetSync, stkRequestCrcEOP }, retries = 20;
   bool result = false;
   
   while (retries > 0 && !result) {
@@ -129,7 +124,7 @@ bool FlashATmega328::stkGetSync() {
     delay(50);
 
     uint8_t response[2] = { 0x00, 0x00 };
-    uint8_t pos = stkPollResponse(response, sizeof(response), 2);
+    uint8_t pos = stkPollResponse(response, sizeof(response), 4);
     
     if (pos < sizeof(response) || response[0] != stkResponseInSync || response[1] != stkResponseOk) {
       retries--;
@@ -320,56 +315,45 @@ size_t FlashATmega328::stkPollResponse(uint8_t *response, size_t responseSize, u
 }
 
 void FlashATmega328::flashFile(File *input) {
-  test();
+  DBG_PRINTF("FlashATmega328: flashFile %s size %d\n", input->name(), input->size());
+
+  bool init = false, flash = false;
+  if (reset()) {
+    init = initFlash();
+
+    uint8_t signature[3];
+    if (init && stkReadSignature(signature)) {
+      DBG_PRINTF("signature %02x %02x %02x flash ", signature[0], signature[1], signature[2]);
+      DBG_FORCE_OUTPUT();
+      flash = true;
+    }
+
+    uint8_t data[128];
+    size_t offset = input->position(), remain = input->available();
+    while (flash && remain) {
+      size_t fRead = input->read(data, (remain > sizeof(data) ? sizeof(data) : remain));
+      DBG_PRINT(".");
+
+      if (!stkLoadAddress(offset) || !stkProgPage(stkPageMemTypeFlash, data, fRead)) {
+        DBG_PRINTF("flash failed 0x%04x\n", offset);
+        flash = false;
+        break;
+      }
+
+      remain -= fRead;
+      offset += fRead;
+    }
+
+    if (flash)
+      DBG_PRINT(" done\n");
+      
+    finishFlash();
+  }
+
+  if (!init)
+    DBG_PRINT("reset atmega failed!");
 }
 
 void FlashATmega328::test() {
-    DBG_PRINT("FlashATmega328:\nreset: ");
-    if (reset()) {
-      DBG_PRINT("ok\ninitFlash: ");
-      bool init = initFlash();
-
-      if (init) {
-        DBG_PRINT("ok\n");
-        uint8_t signature[3];
-        if (stkReadSignature(signature))
-          DBG_PRINTF("signature %02x %02x %02x ", signature[0], signature[1], signature[2]);
-      
-        uint8_t parameter;
-        if (stkGetParameter(stkRequestSWMajor, &parameter))
-          DBG_PRINTF("major %d ", parameter);
-        if (stkGetParameter(stkRequestSWMinor, &parameter))
-          DBG_PRINTF("minor %d ", parameter);
-
-        DBG_PRINT("loadAddress 0x0000 ");
-        if (stkLoadAddress(0x0000)) {
-          DBG_PRINT("ok readPage ");
-          DBG_FORCE_OUTPUT();
-          uint8_t data[64];
-          for (uint8_t p=0; p<2; p++) {
-            if (p > 0)
-              stkLoadAddress(p * sizeof(data));
-            if (stkReadPage(stkPageMemTypeFlash, data, sizeof(data))) {
-              if (p == 0)
-                DBG_PRINT("ok\n")
-              for (int i=0; i<sizeof(data); i++) {
-                if (i % 16 == 0)
-                  DBG_PRINTF(":10%04X00", (p*sizeof(data) + i));
-                DBG_PRINTF("%02X", data[i]);
-                if (i % 16 == 15)
-                  DBG_PRINT("  \n");
-              }
-            } else
-              DBG_PRINT("failed");
-          }
-        } else
-          DBG_PRINT("failed ");
-          
-        DBG_PRINT("\nfinishFlash: ");
-        finishFlash();
-        DBG_PRINT("ok\n");
-      }
-    }
-    DBG_PRINT("\n");
 }
 
