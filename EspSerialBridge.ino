@@ -15,6 +15,7 @@
   #define _OTA_ATMEGA328_SERIAL
 #endif
 
+#include "EspConfig.h"
 #include "EspDebug.h"
 #include "EspSerialBridgeImpl.h"
 #include "EspWifi.h"
@@ -25,6 +26,8 @@
 
 bool httpRequestProcessed     = false;
 
+EspConfig espConfig(PROGNAME);
+
 EspSerialBridge espSerialBridge;
 EspDebug espDebug;
 
@@ -32,8 +35,7 @@ void setup() {
   setupEspTools();
   setupEspWifi();
 
-  espSerialBridge.begin(38400);
-  espSerialBridge.pins(15, 13); // TODO: config page
+  espSerialBridge.begin();
 
   registerDeviceConfigCallback(handleDeviceConfig);
 
@@ -133,9 +135,11 @@ String handleDeviceConfig(ESP8266WebServer *server, uint16_t *resultCode) {
     html += htmlSelect(F("pins"), options) + htmlNewLine();
     action += F("&pins=");
 
-    html += htmlLabel(F("ota"), F("OTA"));
-    html += "<a id=\"ota\" class=\"dc\">OTA</a>";
+#ifdef _OTA_ATMEGA328_SERIAL
+    html = htmlFieldSet(html, F("  <a id=\"ota-addon\" class=\"dc\">OTA</a>"));
+#else
     html = htmlFieldSet(html, F("Settings"));
+#endif
 
     if (html != "") {
       *resultCode = 200;
@@ -145,12 +149,20 @@ String handleDeviceConfig(ESP8266WebServer *server, uint16_t *resultCode) {
   }
 
   if (reqAction == F("submit")) {
-    DBG_PRINT("baud " + server->arg("baud") + 
-      " data " + server->arg("data") + 
-      " parity " + server->arg("parity") +
-      " stop " + server->arg("stop") +
-      " pins " + server->arg("pins") + 
-      " ");
+     EspDeviceConfig deviceConfig = espSerialBridge.getDeviceConfig();
+    
+    deviceConfig.setValue("baud", server->arg("baud"));
+    deviceConfig.setValue("tx", String(server->arg("pins") == "normal" ? 1 : 15));
+    uint8_t dps = 0;
+    dps |= (server->arg("data").toInt() & UART_NB_BIT_MASK);
+    dps |= (server->arg("parity").toInt() & UART_PARITY_MASK);
+    dps |= (server->arg("stop").toInt() & UART_NB_STOP_BIT_MASK);
+    deviceConfig.setValue("dps", String(dps));
+
+    if (deviceConfig.hasChanged()) {
+      deviceConfig.saveToFile();
+      espSerialBridge.readDeviceConfig();
+    }
     
     *resultCode = 200;
     result = F("ok");

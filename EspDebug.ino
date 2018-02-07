@@ -97,21 +97,17 @@ void EspDebug::loop() {
     int dataRead = m_DbgClient.read(data, (recv >= sizeof(data) ? sizeof(data) : recv));
 
     // handle input (TODO)
-    if (data[0] == 'r')
-      ESP.reset();
-    if (data[0] == 'd')
-      WiFi.printDiag(espDebug);
-    if (data[0] == 'a') {
-      espSerialBridge.enableClientConnect(false);
-
-      FlashATmega328 fatm328(2);
-
-      fatm328.test();
-
-      espSerialBridge.enableClientConnect();
+    switch(data[0]) {
+      case 'r':
+        ESP.reset();
+        break;
+      case 'v':
+        DBG_PRINTLN("version: " + String(PROGNAME) + " " + String(PROGVERS) + "@" + getChipID());
+      case 'u':
+        DBG_PRINTLN("uptime: " + uptime());
+        break;
     }
   }
-  
 }
 
 void EspDebug::sendWriteBuffer() {

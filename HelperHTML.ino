@@ -87,7 +87,6 @@ String flashAddonForm() {
   String action = F("/ota/atmega328.bin");
 
   String html = htmlInput("file", "file", "", 0) + htmlNewLine();
-  html += htmlButton("submit", "", "", "Flashen");
 
   return htmlForm(html, action, "post", "submitForm", "multipart/form-data");
 }

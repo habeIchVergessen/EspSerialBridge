@@ -9,12 +9,25 @@ EspSerialBridge::~EspSerialBridge() {
   m_WifiServer = NULL;
 }
 
+void EspSerialBridge::begin(uint16_t tcpPort) {
+  readDeviceConfig();
+  begin(m_Baud, m_SerialConfig, tcpPort);
+}
+  
 void EspSerialBridge::begin(unsigned long baud, SerialConfig serialConfig, uint16_t tcpPort) {
   m_Baud = baud;
   m_SerialConfig = serialConfig;
+  m_tcpPort = tcpPort;
   
+  m_deviceConfigChanged = false;
+
   Serial.begin(m_Baud, m_SerialConfig);
+  if (m_TxPin != 1)
+    pins(15, 13);
   
+  if (m_WifiServer.status() != CLOSED)
+    m_WifiServer.stop();
+    
   m_WifiServer = WiFiServer(tcpPort);
   m_WifiServer.begin();
   m_WifiServer.setNoDelay(true);
@@ -30,6 +43,17 @@ int EspSerialBridge::available() {
 }
 
 void EspSerialBridge::loop() {
+  // apply config changes
+  if (m_deviceConfigChanged) {
+    m_deviceConfigChanged = false;
+
+    // disconnect client & cleanup buffer
+    enableClientConnect(false);
+    begin(m_Baud, m_SerialConfig, m_tcpPort);
+    enableClientConnect();
+    return;
+  }
+  
   // copy serial input to buffer
   while (m_enableReceive && Serial.available()) {
     int data = Serial.read();
@@ -108,16 +132,8 @@ unsigned long EspSerialBridge::getBaud() {
   return m_Baud;
 }
 
-void EspSerialBridge::setBaud(unsigned long baud) {
-  m_Baud = baud;
-}
-
 SerialConfig EspSerialBridge::getSerialConfig() {
   return m_SerialConfig;
-}
-
-void EspSerialBridge::setSerialConfig(SerialConfig serialConfig) {
-  m_SerialConfig = serialConfig;
 }
 
 void EspSerialBridge::enableClientConnect(bool enable) {
@@ -130,6 +146,39 @@ void EspSerialBridge::enableClientConnect(bool enable) {
     // send buffered data
     loop();
     m_WifiClient.stop();
+
+    m_inPos = 0;
+  }
+}
+
+void EspSerialBridge::readDeviceConfig() {
+  EspDeviceConfig deviceConfig = getDeviceConfig();
+  
+  // baud
+  String value = deviceConfig.getValue("baud");
+  if (value != "") {
+    int newVal = value.toInt();
+    if (!m_deviceConfigChanged && m_Baud != newVal)
+      m_deviceConfigChanged = true;
+    m_Baud = newVal;
+  }
+    
+  // tx-pin
+  value = deviceConfig.getValue("tx");
+  if (value != "") {
+    int newVal = (value == "1" ? 1 : 15);
+    if (!m_deviceConfigChanged && m_TxPin != newVal)
+      m_deviceConfigChanged = true;
+    m_TxPin = newVal;
+  }
+
+  // data/parity/stop
+  value = deviceConfig.getValue("dps");
+  if (value != "") {
+    SerialConfig newVal = (SerialConfig)(value.toInt() & (UART_NB_BIT_MASK | UART_PARITY_MASK | UART_NB_STOP_BIT_MASK));
+    if (!m_deviceConfigChanged && m_SerialConfig != newVal)
+      m_deviceConfigChanged = true;
+    m_SerialConfig = newVal;
   }
 }
 

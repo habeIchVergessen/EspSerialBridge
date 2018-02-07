@@ -23,7 +23,7 @@ extern "C" {
 #include "user_interface.h"
 }
 
-#if defined(_ESP1WIRE_SUPPORT) || defined(_OTA_ATMEGA328_SERIAL)
+#if defined(_ESP1WIRE_SUPPORT) || defined(_ESPSERIALBRIDGE_SUPPORT)
 DeviceConfigCallback deviceConfigCallback = NULL;
 void registerDeviceConfigCallback(DeviceConfigCallback callback) {
   deviceConfigCallback = callback;
@@ -210,7 +210,6 @@ void setupHttp() {
   server.onNotFound(httpHandleNotFound);
   server.addHandler(new FunctionRequestHandler(httpHandleOTA, httpHandleOTAData, ("/ota/" + getChipID() + ".bin").c_str(), HTTP_POST));
 #ifdef _OTA_ATMEGA328_SERIAL
-  server.on("/ota/atmega328.bin", HTTP_GET, httpHandleATMega328);
   server.addHandler(new FunctionRequestHandler(httpHandleOTAatmega328, httpHandleOTAatmega328Data, String("/ota/atmega328.bin").c_str(), HTTP_POST));
 #endif
 
@@ -292,7 +291,7 @@ void httpHandleConfig() {
     }
 #endif
 
-#ifdef _OTA_ATMEGA328_SERIAL
+#ifdef _ESPSERIALBRIDGE_SUPPORT
     if (server.hasArg("serial") && (server.arg("serial") == "" || server.arg("serial") == "config")) {
       String result = "";
       uint16_t resultCode;
@@ -374,8 +373,8 @@ void httpHandleConfig() {
     }
 
 #ifdef _OTA_ATMEGA328_SERIAL
-    if (server.hasArg("ota") && server.arg("ota")== "" && server.hasArg("serial") && server.arg("serial")== "") {
-      String result = F("<h4>OTA</h4>");
+    if (server.hasArg("ota-addon") && server.arg("ota-addon")== "") {
+      String result = F("<h4>OTA Addon</h4>");
       result += flashAddonForm();
       server.client().setNoDelay(true);
       server.send(200, "text/html", result);
@@ -536,7 +535,7 @@ void httpHandleDeviceListJss() {
   String script = F("function windowClick(e){if(e.target.className==\"dc\"&&e.target.id){modDlg(true,false,e.target.id);}}function modDlg(open,save,id){if(id=='back'){history.back();return;}document.onkeypress=(open?function(evt){evt=evt||window.event;var charCode=evt.keyCode||evt.which;if(charCode==27)modDlg(false,false);if(charCode==13)modDlg(false,true);}:null);var md=document.getElementById('mD');if(save){var form=document.getElementById('submitForm');if(form){form.submit();return;}form=document.getElementById('configForm');if(form){var aStr=form.action;var idx=aStr.indexOf('?');var url=aStr.substr(0, idx + 1);var params='';var elem;var parse;aStr=aStr.substr(idx + 1);while(1){idx=aStr.indexOf('&');if(idx>0)parse=aStr.substr(0, idx);else parse=aStr;");
   script += F("if(parse.substr(parse.length-1)!='='){params+=parse+'&';}else{elem=document.getElementsByName(parse.substr(0,parse.length-1));if(elem && elem[0])params+=parse+(elem[0].type!=\"checkbox\"?elem[0].value:(elem[0].checked?1:0))+'&';}if(idx>0) aStr=aStr.substr(idx+1); else break;}try{var xmlHttp=new XMLHttpRequest();xmlHttp.open('POST',url+params,false);xmlHttp.send(null);if(xmlHttp.status!=200){alert('Fehler: '+xmlHttp.statusText);return;}}catch(err){alert('Fehler: '+err.message);return;}}}if(open){try{var url='/config?ChipID=");
   script += getChipID();
-  script += F("&action=form';if(id.indexOf('schedule#')==0)url+='&schedule='+id.substr(9);else if(id=='mqtt'||id=='wifi'||id=='ota'||id=='resetSearch'||id=='serial')url+='&'+id+'=';else url+='&deviceID='+id;var xmlHttp=new XMLHttpRequest(); xmlHttp.open('POST',url,false);xmlHttp.send(null);if(xmlHttp.status != 200){alert('Fehler: '+xmlHttp.statusText);return;}if(id=='resetSearch'){window.location.reload();return;}document.getElementById('mDCC').innerHTML=xmlHttp.responseText;}catch(err){alert('Fehler: '+err.message);return;}}md.style.visibility=(open?'visible':'hidden');if(!open){document.getElementById('mDCC').innerHTML='';}}");
+  script += F("&action=form';if(id.indexOf('schedule#')==0)url+='&schedule='+id.substr(9);else if(id=='mqtt'||id=='wifi'||id.indexOf('ota')==0||id=='resetSearch'||id=='serial')url+='&'+id+'=';else url+='&deviceID='+id;var xmlHttp=new XMLHttpRequest(); xmlHttp.open('POST',url,false);xmlHttp.send(null);if(xmlHttp.status != 200){alert('Fehler: '+xmlHttp.statusText);return;}if(id=='resetSearch'){window.location.reload();return;}document.getElementById('mDCC').innerHTML=xmlHttp.responseText;}catch(err){alert('Fehler: '+err.message);return;}}md.style.visibility=(open?'visible':'hidden');if(!open){document.getElementById('mDCC').innerHTML='';}}");
   script += F("function filter(){var filter=document.getElementsByName('filter')[0];var table=document.getElementById('devices');if(filter&&table){var trs=document.getElementsByTagName('tr');i=1;while(trs[i]){trs[i].style.display=((filter.value&trs[i].firstChild.nodeValue)==filter.value||filter.value==255?'table-row':'none');i++;}}}");
   server.send(200, "text/javascript", script);
   httpRequestProcessed = true;
@@ -597,6 +596,7 @@ void printUpdateError() {
 }
 
 #ifdef _OTA_NO_SPIFFS
+
 void httpHandleOTA() {
   String message = "\n\nhttpHandleOTA: ";
   bool doReset = false;
@@ -693,7 +693,7 @@ void clearOtaFile() {
   otaFileName = "";
 }
 
-#endif  // defined(_OTA_NO_SPIFFS) || defined()
+#endif  // defined(_OTA_NO_SPIFFS) || defined(_OTA_ATMEGA328_SERIAL)
 
 #ifndef _OTA_NO_SPIFFS
 
@@ -823,7 +823,8 @@ void httpHandleOTAatmega328() {
   }
 
   server.client().setNoDelay(true);
-  server.send(200, "text/html", message);
+  server.sendHeader("Location", "/");
+  server.send(303, "text/plain", "See Other");
   httpRequestProcessed = true;
 }
 
@@ -873,15 +874,6 @@ void httpHandleOTAatmega328Data() {
     clearParser();
     clearOtaFile();
   }
-}
-
-void httpHandleATMega328() {
-  DBG_PRINT("httpHandleATMega328: ");
-  String result = F("<h4>OTA</h4>");
-  result += flashAddonForm();
-  server.client().setNoDelay(true);
-  server.send(200, "text/html", result);
-  httpRequestProcessed = true;
 }
 
 #endif

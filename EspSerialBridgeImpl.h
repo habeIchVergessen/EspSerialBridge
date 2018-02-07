@@ -7,21 +7,23 @@
 #include <ESP8266WiFi.h>
 
 #include "EspDebug.h"
+#include "EspConfig.h"
 
 class EspSerialBridge {
   public:
     EspSerialBridge();
     ~EspSerialBridge();
 
-    void begin(unsigned long baud=9600, SerialConfig serialConfig=SERIAL_8N1, uint16_t tcpPort=23);
+    void begin(uint16_t tcpPort=23);
+    void begin(unsigned long baud, SerialConfig serialConfig, uint16_t tcpPort);
     void pins(uint8_t tx, uint8_t rx);
     void loop();
+    EspDeviceConfig getDeviceConfig() { return espConfig.getDeviceConfig("Serial"); };
+    void readDeviceConfig();
 
     uint8_t getTxPin();
     unsigned long getBaud();
-    void setBaud(unsigned long baud);
     SerialConfig getSerialConfig();
-    void setSerialConfig(SerialConfig serialConfig);
 
     void enableReceive(bool enable=true) { m_enableReceive = enable; };
     void enableClientConnect(bool enable=true);
@@ -52,7 +54,7 @@ class EspSerialBridge {
     
     int available();
     void enableSessionDetection(bool enable=true) { m_sessionDetection = enable; }
-  
+
   private:
     static const unsigned int m_bufferSize=256;
     byte m_buffer[m_bufferSize];
@@ -64,9 +66,11 @@ class EspSerialBridge {
     WiFiServer m_WifiServer = NULL;
     WiFiClient m_WifiClient;
 
+    bool m_deviceConfigChanged = false;
     uint8_t m_TxPin = 1;
     unsigned long m_Baud = 9600;
     SerialConfig m_SerialConfig = SERIAL_8N1;
+    uint16_t m_tcpPort;
 };
 
 #endif
