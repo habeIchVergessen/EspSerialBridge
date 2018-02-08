@@ -93,12 +93,14 @@ void EspSerialBridge::loop() {
     if (m_sessionDetection) {
       if (recv >= 2 && data[0] == telnetIAC && (data[1] == telnetDO || data[1] == telnetWILL)) {
         DBG_PRINTLN("telnet connection detected!");
+        m_telnetSession.sessionState = telnetStateNormal;
       }
       enableSessionDetection(false);
     }
-
+    
     for (int i=0; i<dataRead; i++)
-      Serial.write((data[i] & 0xff));
+      if (!telnetProtocolParse(data[i] & 0xff))
+        Serial.write((data[i] & 0xff));
 
 #ifdef _DEBUG_TRAFFIC
     String msg = "recv: " + String(dataRead) + " bytes";
@@ -122,6 +124,267 @@ void EspSerialBridge::loop() {
       enableSessionDetection();
     }
   }
+}
+
+bool EspSerialBridge::telnetProtocolParse(uint8_t byte) {
+  if (m_telnetSession.sessionState == telnetStateNone)
+    return false;
+
+  if (m_telnetSession.sessionState == telnetStateNormal)
+    switch (byte) {
+      case telnetIAC:
+        m_telnetSession.sessionState = telnetStateIac;
+        return true;
+        break;
+      default:
+        return false;
+        break;
+    }
+
+  if (m_telnetSession.sessionState == telnetStateIac)
+    switch (byte) {
+      case telnetIAC:
+        m_telnetSession.sessionState = telnetStateNormal;
+        return false;
+        break;
+      case telnetDO:
+        m_telnetSession.sessionState = telnetStateDo;
+        return true;
+        break;
+      case telnetWILL:
+        m_telnetSession.sessionState = telnetStateWill;
+        return true;
+        break;
+      case telnetSB:
+        m_telnetSession.sessionState = telnetStateStart;
+        return true;
+        break;
+      case telnetSE:
+        m_telnetSession.sessionState = telnetStateNormal;
+        return true;
+        break;
+      default:
+#ifdef _DEBUG_TELNET_IAC
+        DBG_PRINTF("iac: unknown %02x ", byte);
+#endif
+        m_telnetSession.sessionState = telnetStateNormal;
+        return true;
+        break;
+    }
+
+  if (m_telnetSession.sessionState == telnetStateWill) {
+    uint8_t resp[3] = { telnetIAC, telnetDONT, byte };
+
+    if (byte == telnetComPortOpt)
+      resp[1] = telnetDO;
+#ifdef _DEBUG_TELNET_WILL
+    else
+      DBG_PRINTF("telnet: will ignore %02x\n", byte);
+#endif
+    telnetResponse(resp, sizeof(resp));
+    
+    m_telnetSession.sessionState = telnetStateNormal;
+    return true;
+  }
+
+  if (m_telnetSession.sessionState == telnetStateDo) {
+//    uint8_t resp[3] = { telnetIAC, telnetWONT, byte };
+//
+//    if (byte == telnetComPortOpt)
+//      resp[1] = telnetDO;
+//    else
+//      DBG_PRINTF("do: ignore %02x ", byte);
+//    telnetResponse(resp, sizeof(resp));
+#ifdef _DEBUG_TELNET_DO
+    DBG_PRINTF("telnet: do %02x", byte);
+#endif
+    m_telnetSession.sessionState = telnetStateNormal;
+    return true;
+  }
+
+  if (m_telnetSession.sessionState == telnetStateStart) {
+    m_telnetSession.sessionState = (byte == telnetComPortOpt ? telnetStateComPort : telnetStateEnd);
+    return true;
+  }
+
+  if (m_telnetSession.sessionState == telnetStateEnd) {
+    if (byte == telnetIAC)
+      m_telnetSession.sessionState = telnetStateIac;
+    return true;
+  }
+
+  if (m_telnetSession.sessionState == telnetStateComPort) {
+    switch (byte) {
+      case telnetComPortSetBaud: 
+        m_telnetSession.sessionState = telnetStateSetBaud; 
+        m_telnetSession.baudCnt = 0; 
+        m_telnetSession.baud = 0; 
+        break;
+      case telnetComPortSetDataSize:
+        m_telnetSession.sessionState = telnetStateSetDataSize;
+        break;
+      case telnetComPortSetParity: 
+        m_telnetSession.sessionState = telnetStateSetParity;
+        break;
+      case telnetComPortSetStopSize:
+        m_telnetSession.sessionState = telnetStateSetStopSize;
+        break;
+      case telnetComPortSetControl:
+        m_telnetSession.sessionState = telnetStateSetControl;
+        break;
+      case telnetComPortPurgeData: 
+        m_telnetSession.sessionState = telnetStatePurgeData; 
+        break;
+      default:
+        m_telnetSession.sessionState = telnetStateEnd; 
+        break;
+    }
+    return true;
+  }
+
+  if (m_telnetSession.sessionState == telnetStateSetControl) {
+    switch (byte) {
+      case telnetComPortControlCommandPurgeTX:
+        break;
+      case telnetComPortControlCommandBrkReq:
+        break;
+      case telnetComPortControlCommandBrkOn:
+        break;
+      case telnetComPortControlCommandBrkOff:
+        break;
+      case telnetComPortControlCommandDTROn:
+        break;
+      case telnetComPortControlCommandDTROff:
+        break;
+      case telnetComPortControlCommandRTSOn:
+        break;
+      case telnetComPortControlCommandRTSOff:
+        break;
+    }
+
+    m_telnetSession.sessionState = telnetStateEnd; 
+    return true;
+  }
+
+  if (m_telnetSession.sessionState == telnetStateSetBaud) {
+    m_telnetSession.baud |= byte;
+    m_telnetSession.baudCnt++;
+
+    if (m_telnetSession.baudCnt < 4) {
+      m_telnetSession.baud <<= 8;
+      return true;
+    }
+
+    if (m_telnetSession.baud == 0) {
+        unsigned long baud = getBaud();
+        uint8_t resp[10] = { telnetIAC, telnetSB, telnetComPortOpt, telnetComPortSetBaud,
+         baud>>24, baud>>16, baud>>8, baud, telnetIAC, telnetSE };
+        telnetResponse(resp, sizeof(resp));
+    } else if (m_telnetSession.baud >= 300 && m_telnetSession.baud <= 115200) {
+        EspDeviceConfig deviceConfig = getDeviceConfig();
+        deviceConfig.setValue("baud", String(m_telnetSession.baud));
+        if (deviceConfig.hasChanged()) {
+          deviceConfig.saveToFile();
+          readDeviceConfig();
+      }
+    }
+    
+    m_telnetSession.sessionState = telnetStateEnd; 
+    return true;
+  }
+
+  if (m_telnetSession.sessionState == telnetStateSetDataSize) {
+    if (byte == 0) {
+        uint8_t resp[7] = { telnetIAC, telnetSB, telnetComPortOpt, telnetComPortSetDataSize, 
+          ((getSerialConfig() & UART_NB_BIT_MASK) >> 2) + 5, telnetIAC, telnetSE };
+        telnetResponse(resp, sizeof(resp));
+    } else if (byte >= 5 && byte <= 8) {
+      uint8_t dataSize[4] = { UART_NB_BIT_5, UART_NB_BIT_6, UART_NB_BIT_7, UART_NB_BIT_8 };
+      uint8_t serialConfig = (getSerialConfig() & ~UART_NB_BIT_MASK) & dataSize[byte - 5];
+
+      EspDeviceConfig deviceConfig = getDeviceConfig();
+      deviceConfig.setValue("dps", String(serialConfig));
+      if (deviceConfig.hasChanged()) {
+        deviceConfig.saveToFile();
+        readDeviceConfig();
+      }
+    }
+
+    m_telnetSession.sessionState = telnetStateEnd; 
+    return true;
+  }
+
+  if (m_telnetSession.sessionState == telnetStateSetParity) {
+    if (byte == 0) {
+      uint8_t resp[7] = { telnetIAC, telnetSB, telnetComPortOpt, telnetComPortSetParity,
+        ((getSerialConfig() & UART_PARITY_MASK)) + 1, telnetIAC, telnetSE };
+      telnetResponse(resp, sizeof(resp));
+    } else if (byte >= 1 && byte <= 3) {
+      uint8_t parity[3] = { UART_PARITY_NONE, UART_PARITY_EVEN, UART_PARITY_ODD };
+      uint8_t serialConfig = (getSerialConfig() & ~UART_PARITY_MASK) & parity[byte - 1];
+
+      EspDeviceConfig deviceConfig = getDeviceConfig();
+      deviceConfig.setValue("dps", String(serialConfig));
+      if (deviceConfig.hasChanged()) {
+        deviceConfig.saveToFile();
+        readDeviceConfig();
+      }
+    }
+
+    m_telnetSession.sessionState = telnetStateEnd; 
+    return true;
+  }
+
+  if (m_telnetSession.sessionState == telnetStateSetStopSize) {
+    if (byte == 0) {
+      uint8_t stopBits;
+      switch((getSerialConfig() & UART_NB_STOP_BIT_MASK)) {
+        case UART_NB_STOP_BIT_1:
+          stopBits = 1;
+          break;
+        case UART_NB_STOP_BIT_15:
+          stopBits = 3;
+          break;
+        case UART_NB_STOP_BIT_2:
+          stopBits = 2;
+          break;
+      }
+      uint8_t resp[7] = { telnetIAC, telnetSB, telnetComPortOpt, telnetComPortSetStopSize, stopBits, telnetIAC, telnetSE };
+      telnetResponse(resp, sizeof(resp));
+    } else if (byte >= 1 && byte <= 3) {
+      uint8_t stopBits[3] = { UART_NB_STOP_BIT_1, UART_NB_STOP_BIT_2, UART_NB_STOP_BIT_15 };
+      uint8_t serialConfig = (getSerialConfig() & ~UART_NB_STOP_BIT_MASK) & stopBits[byte - 1];
+
+      EspDeviceConfig deviceConfig = getDeviceConfig();
+      deviceConfig.setValue("dps", String(serialConfig));
+      if (deviceConfig.hasChanged()) {
+        deviceConfig.saveToFile();
+        readDeviceConfig();
+      }
+    }
+
+    DBG_PRINTF("stopSize: %02x ", byte);
+    
+    m_telnetSession.sessionState = telnetStateEnd; 
+    return true;
+  }
+
+  if (m_telnetSession.sessionState == telnetStatePurgeData) {
+    if (byte == telnetComPortControlCommandPurgeTX)
+      ;
+    m_telnetSession.sessionState = telnetStateEnd; 
+    return true;
+  }
+
+   DBG_PRINTF("\n\nunknown telnet: state %02x byte %02x\n", m_telnetSession.sessionState, byte);
+   m_telnetSession.sessionState = telnetStateNormal;
+}
+
+void EspSerialBridge::telnetResponse(uint8_t *response, size_t responseSize) {
+  int socketSend = m_WifiClient.write((unsigned char*)response, responseSize);    
+#ifdef _DEBUG_TELNET_WILL_RESPONSE
+  DBG_PRINT("telnetResponse: "); for (size_t i=0; i<responseSize; i++) DBG_PRINTF("%02x ", response[i]);
+#endif
 }
 
 uint8_t EspSerialBridge::getTxPin() {

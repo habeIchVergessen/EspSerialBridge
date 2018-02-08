@@ -15,6 +15,12 @@
   #define _OTA_ATMEGA328_SERIAL
 #endif
 
+// telnet debug
+#define _DEBUG_TELNET_IAC
+//#define _DEBUG_TELNET_WILL
+//#define _DEBUG_TELNET_DO
+//#define _DEBUG_TELNET_WILL_RESPONSE
+
 #include "EspConfig.h"
 #include "EspDebug.h"
 #include "EspSerialBridgeImpl.h"
@@ -149,7 +155,7 @@ String handleDeviceConfig(ESP8266WebServer *server, uint16_t *resultCode) {
   }
 
   if (reqAction == F("submit")) {
-     EspDeviceConfig deviceConfig = espSerialBridge.getDeviceConfig();
+    EspDeviceConfig deviceConfig = espSerialBridge.getDeviceConfig();
     
     deviceConfig.setValue("baud", server->arg("baud"));
     deviceConfig.setValue("tx", String(server->arg("pins") == "normal" ? 1 : 15));
