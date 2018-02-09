@@ -90,6 +90,7 @@ void EspSerialBridge::loop() {
     byte data[128];      
     int dataRead = m_WifiClient.read(data, (recv >= sizeof(data) ? sizeof(data) : recv));
     
+#ifdef _ESPSERIALBRIDGE_TELNET_SUPPORT
     if (m_sessionDetection) {
       if (recv >= 2 && data[0] == telnetIAC && (data[1] == telnetDO || data[1] == telnetWILL)) {
         DBG_PRINTLN("telnet connection detected!");
@@ -97,9 +98,12 @@ void EspSerialBridge::loop() {
       }
       enableSessionDetection(false);
     }
+#endif  // _ESPSERIALBRIDGE_TELNET_SUPPORT
     
     for (int i=0; i<dataRead; i++)
+#ifdef _ESPSERIALBRIDGE_TELNET_SUPPORT
       if (!telnetProtocolParse(data[i] & 0xff))
+#endif  // _ESPSERIALBRIDGE_TELNET_SUPPORT
         Serial.write((data[i] & 0xff));
 
 #ifdef _DEBUG_TRAFFIC
@@ -121,9 +125,94 @@ void EspSerialBridge::loop() {
     // accept new connection
       m_WifiClient = wifiClient;
       m_WifiClient.setNoDelay(true);
+#ifdef _ESPSERIALBRIDGE_TELNET_SUPPORT
       enableSessionDetection();
+#endif  // _ESPSERIALBRIDGE_TELNET_SUPPORT
     }
   }
+}
+
+uint8_t EspSerialBridge::getTxPin() {
+  return m_TxPin;  
+}
+
+unsigned long EspSerialBridge::getBaud() {
+  return m_Baud;
+}
+
+SerialConfig EspSerialBridge::getSerialConfig() {
+  return m_SerialConfig;
+}
+
+void EspSerialBridge::enableClientConnect(bool enable) {
+  if (m_enableClient == enable)
+    return;
+    
+  m_enableClient = enable;
+
+  if (!enable && m_WifiClient.status() != CLOSED) {
+    // send buffered data
+    loop();
+    m_WifiClient.stop();
+
+    m_inPos = 0;
+  }
+}
+
+void EspSerialBridge::readDeviceConfig() {
+  EspDeviceConfig deviceConfig = getDeviceConfig();
+  
+  // baud
+  String value = deviceConfig.getValue("baud");
+  if (value != "") {
+    int newVal = value.toInt();
+    if (!m_deviceConfigChanged && m_Baud != newVal)
+      m_deviceConfigChanged = true;
+    m_Baud = newVal;
+  }
+    
+  // tx-pin
+  value = deviceConfig.getValue("tx");
+  if (value != "") {
+    int newVal = (value == "1" ? 1 : 15);
+    if (!m_deviceConfigChanged && m_TxPin != newVal)
+      m_deviceConfigChanged = true;
+    m_TxPin = newVal;
+  }
+
+  // data/parity/stop
+  value = deviceConfig.getValue("dps");
+  if (value != "") {
+    SerialConfig newVal = (SerialConfig)(value.toInt() & (UART_NB_BIT_MASK | UART_PARITY_MASK | UART_NB_STOP_BIT_MASK));
+    if (!m_deviceConfigChanged && m_SerialConfig != newVal)
+      m_deviceConfigChanged = true;
+    m_SerialConfig = newVal;
+  }
+}
+
+void EspSerialBridge::printDiag(Print& dest) {
+  // serial
+  const char *bits[] = { "5", "6", "7", "8" };
+  const char *parities[] { "N", "O", "E" };
+  const char *stops[] = { "0", "1", "1.5", "2" };
+  dest.printf("serial: baud %d dps %s%s%s tx %d (%d/%d)\n", m_Baud, bits[(m_SerialConfig & UART_NB_BIT_MASK) >> 2]
+    , parities[(m_SerialConfig & UART_PARITY_MASK)], stops[(m_SerialConfig & UART_NB_STOP_BIT_MASK) >> 4], m_TxPin, Serial.isTxEnabled(), Serial.isRxEnabled());
+
+  // client
+  if (m_WifiClient.status() != CLOSED) {
+    dest.printf("client: ip %s\n", m_WifiClient.remoteIP().toString().c_str());
+#ifdef _ESPSERIALBRIDGE_TELNET_SUPPORT
+    dest.printf("telnet: state %02x\n", m_telnetSession.sessionState);
+#endif  // _ESPSERIALBRIDGE_TELNET_SUPPORT
+  }
+}
+
+#ifdef _ESPSERIALBRIDGE_TELNET_SUPPORT
+
+void enableSessionDetection(bool enable=true) {
+  m_sessionDetection = enable; 
+  if (enable) 
+    m_telnetSession.sessionState = telnetStateNone;
 }
 
 bool EspSerialBridge::telnetProtocolParse(uint8_t byte) {
@@ -243,6 +332,7 @@ bool EspSerialBridge::telnetProtocolParse(uint8_t byte) {
   }
 
   if (m_telnetSession.sessionState == telnetStateSetControl) {
+    DBG_PRINTF("setControl: %02x\n", byte);
     switch (byte) {
       case telnetComPortControlCommandPurgeTX:
         break;
@@ -252,9 +342,13 @@ bool EspSerialBridge::telnetProtocolParse(uint8_t byte) {
         break;
       case telnetComPortControlCommandBrkOff:
         break;
+      case telnetComPortControlCommandDTRReq:
+        break;
       case telnetComPortControlCommandDTROn:
         break;
       case telnetComPortControlCommandDTROff:
+        break;
+      case telnetComPortControlCommandRTSReq:
         break;
       case telnetComPortControlCommandRTSOn:
         break;
@@ -382,66 +476,11 @@ bool EspSerialBridge::telnetProtocolParse(uint8_t byte) {
 
 void EspSerialBridge::telnetResponse(uint8_t *response, size_t responseSize) {
   int socketSend = m_WifiClient.write((unsigned char*)response, responseSize);    
-#ifdef _DEBUG_TELNET_WILL_RESPONSE
+#ifdef _DEBUG_TELNET_RESPONSE
   DBG_PRINT("telnetResponse: "); for (size_t i=0; i<responseSize; i++) DBG_PRINTF("%02x ", response[i]);
 #endif
 }
 
-uint8_t EspSerialBridge::getTxPin() {
-  return m_TxPin;  
-}
+#endif  // _ESPSERIALBRIDGE_TELNET_SUPPORT
 
-unsigned long EspSerialBridge::getBaud() {
-  return m_Baud;
-}
-
-SerialConfig EspSerialBridge::getSerialConfig() {
-  return m_SerialConfig;
-}
-
-void EspSerialBridge::enableClientConnect(bool enable) {
-  if (m_enableClient == enable)
-    return;
-    
-  m_enableClient = enable;
-
-  if (!enable && m_WifiClient.status() != CLOSED) {
-    // send buffered data
-    loop();
-    m_WifiClient.stop();
-
-    m_inPos = 0;
-  }
-}
-
-void EspSerialBridge::readDeviceConfig() {
-  EspDeviceConfig deviceConfig = getDeviceConfig();
-  
-  // baud
-  String value = deviceConfig.getValue("baud");
-  if (value != "") {
-    int newVal = value.toInt();
-    if (!m_deviceConfigChanged && m_Baud != newVal)
-      m_deviceConfigChanged = true;
-    m_Baud = newVal;
-  }
-    
-  // tx-pin
-  value = deviceConfig.getValue("tx");
-  if (value != "") {
-    int newVal = (value == "1" ? 1 : 15);
-    if (!m_deviceConfigChanged && m_TxPin != newVal)
-      m_deviceConfigChanged = true;
-    m_TxPin = newVal;
-  }
-
-  // data/parity/stop
-  value = deviceConfig.getValue("dps");
-  if (value != "") {
-    SerialConfig newVal = (SerialConfig)(value.toInt() & (UART_NB_BIT_MASK | UART_PARITY_MASK | UART_NB_STOP_BIT_MASK));
-    if (!m_deviceConfigChanged && m_SerialConfig != newVal)
-      m_deviceConfigChanged = true;
-    m_SerialConfig = newVal;
-  }
-}
 

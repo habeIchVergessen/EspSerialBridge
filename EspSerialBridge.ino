@@ -15,12 +15,6 @@
   #define _OTA_ATMEGA328_SERIAL
 #endif
 
-// telnet debug
-#define _DEBUG_TELNET_IAC
-//#define _DEBUG_TELNET_WILL
-//#define _DEBUG_TELNET_DO
-//#define _DEBUG_TELNET_WILL_RESPONSE
-
 #include "EspConfig.h"
 #include "EspDebug.h"
 #include "EspSerialBridgeImpl.h"

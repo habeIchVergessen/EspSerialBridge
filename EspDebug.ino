@@ -1,6 +1,4 @@
 #include "Debug.h"
-#include "IntelHexFormatParser.h"
-#include "FlashATmega328Serial.h"
 
 EspDebug::EspDebug() {
 }
@@ -98,6 +96,9 @@ void EspDebug::loop() {
 
     // handle input (TODO)
     switch(data[0]) {
+      case 'c':
+        espSerialBridge.printDiag(espDebug);
+        break;
       case 'r':
         ESP.reset();
         break;
