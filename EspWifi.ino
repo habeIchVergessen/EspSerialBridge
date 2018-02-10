@@ -7,8 +7,9 @@
 #include "FS.h"
 #include "detail/RequestHandlersImpl.h"
 
+#include "EspConfig.h"
+
 #ifdef _MQTT_SUPPORT
-  #include "EspConfig.h"
   #include "EspMqtt.h"
 #endif
 
@@ -66,11 +67,16 @@ bool lastWiFiStatus = false;
 IPAddress ipMulti(239, 0, 0, 57);
 unsigned int portMulti = 12345;      // local port to listen on
 
+// net config changed (loop has to handle it)
+bool netConfigChanged = false;
+
 WiFiUDP WiFiUdp;
 ESP8266WebServer server(80);
 
 void setupEspWifi() {
-//  WiFi.hostname("bla");
+  String hostname = espConfig.getValue("hostname");
+  if (hostname != "")
+    WiFi.hostname(hostname);
 
   DBG_PRINT("Hostname: "); DBG_PRINTLN(WiFi.hostname());
   DBG_PRINT("MAC:      "); DBG_PRINTLN(WiFi.macAddress());
@@ -82,6 +88,14 @@ void setupEspWifi() {
 }
 
 void loopEspWifi() {
+  if (netConfigChanged) {
+    // spend some time for http clients
+    delay(2000);
+    setupWifi();
+    yield();
+    netConfigChanged = false;
+  }
+  
   statusWifi();
 
   unsigned int start = millis();
@@ -94,12 +108,24 @@ void loopEspWifi() {
 }
 
 void setupWifi() {
-  DBG_PRINTLN("starting WiFi");
+  DBG_PRINT("starting WiFi ");
 
-  if (WiFi.getMode() != WIFI_STA) {
+  if (WiFi.getMode() != WIFI_STA)
     WiFi.mode(WIFI_STA);
-  }
 
+  // static ip
+  IPAddress ip, mask, gw, dns;
+  if (ip.fromString(espConfig.getValue("address")) && ip != INADDR_NONE &&
+      mask.fromString(espConfig.getValue("mask")) && mask != INADDR_NONE
+  ) {
+    if (!gw.fromString(espConfig.getValue("gateway")))
+      gw = INADDR_NONE;
+    if (!dns.fromString(espConfig.getValue("dns")))
+      dns = INADDR_NONE;
+    DBG_PRINTF("using static ip %s mask %s %s\n", ip.toString().c_str(), mask.toString().c_str(), String(WiFi.config(ip, gw, mask, dns) ? "ok" : "").c_str());
+  } else
+    DBG_PRINTF("using dhcp %s\n", String(WiFi.config(0U, 0U, 0U) ? "ok" : "").c_str());
+    
   // force wait for connect
   lastWiFiStatus = !(WiFi.status() == WL_CONNECTED);
   statusWifi(true);
@@ -191,6 +217,47 @@ void reconfigWifi(String ssid, String password) {
   }
 }
 
+void configNet() {
+  IPAddress ip, mask, gw, dns;
+
+  if (!ip.fromString(server.arg("address")) || !mask.fromString(server.arg("mask"))) {
+    DBG_PRINT("configNet: clear config ip/mask invalid ");
+    ip = mask = INADDR_NONE;
+    espConfig.unsetValue("address");
+    espConfig.unsetValue("mask");
+    espConfig.unsetValue("gateway");
+    espConfig.unsetValue("dns");
+  } else {
+    DBG_PRINT("configNet: apply config ");
+    if (ip != INADDR_NONE) 
+      espConfig.setValue("address", ip.toString());
+    else
+      espConfig.unsetValue("address");
+    if (mask != INADDR_NONE)
+      espConfig.setValue("mask", mask.toString());
+    else
+      espConfig.unsetValue("mask");
+    if (gw.fromString(server.arg("gateway")))
+      espConfig.setValue("gateway", gw.toString());
+    else
+      espConfig.unsetValue("gateway");
+    if (dns.fromString(server.arg("dns")))
+      espConfig.setValue("dns", dns.toString());
+    else
+      espConfig.unsetValue("dns");
+  }
+  
+  if (espConfig.hasChanged()) {
+    DBG_PRINT("saving ");
+    espConfig.saveToFile();
+
+    // apply next loop
+    netConfigChanged = true;
+  }
+
+  DBG_PRINT("\n");
+}
+
 void setupHttp() {
 //  if (MDNS.begin(WiFi.hostname().c_str()))
 //    DBG_PRINTLN("MDNS responder started");
@@ -234,15 +301,17 @@ void httpHandleRoot() {
   message += "<sp>" + uptime() + "</sp></div>";
 
   // wifi
+  String netConfig = "<a id=\"net\" class=\"dc\">...</a>";
   String html = "<table><tr><td>ssid:</td><td>" + WiFi.SSID() + "</td><td><a id=\"wifi\" class=\"dc\">...</a></td></tr>";
   if (WiFi.status() == WL_CONNECTED) {
     html += F("<tr><td>Status:</td><td>connected</td><td></td></tr>");
-    html += F("<tr><td>Hostname:</td><td>"); html += WiFi.hostname(); html += F(" (MAC: "); html += WiFi.macAddress();html += F(")</td><td></td></tr>");
-    html += F("<tr><td>IP:</td><td>"); html += ipString(WiFi.localIP()); html += F("/"); html +=ipString(WiFi.subnetMask()); html += F(" "); html += ipString(WiFi.gatewayIP()); html += F("</td><td></td></tr>");
+    html += F("<tr><td>Hostname:</td><td>"); html += WiFi.hostname(); html += F(" (MAC: "); html += WiFi.macAddress();html += F(")</td><td rowspan=\"2\">");
+    html += netConfig; html += F("</td></tr>");
+    html += F("<tr><td>IP:</td><td>"); html += ipString(WiFi.localIP()); html += F("/"); html +=ipString(WiFi.subnetMask()); html += F(" "); html += ipString(WiFi.gatewayIP()); html += F("</td></tr>");
   } else {
-    html += F("<tr><td>Status:</td><td>disconnected</td><td> (MAC: ");
+    html += F("<tr><td>Status:</td><td>disconnected (MAC: ");
     html += WiFi.macAddress();
-    html += F(")</td></tr>");
+    html += F(")</td><td>"); html +=netConfig; html += F("</td></tr>");
   }
   html += F("</table>");
   message += htmlFieldSet(html, "WiFi");
@@ -400,6 +469,23 @@ void httpHandleConfig() {
       return;
     }
 
+    if (server.hasArg("net") && server.arg("net")== "") {
+      String result = F("<h4>Network</h4>");
+      result += netForm();
+      server.client().setNoDelay(true);
+      server.send(200, "text/html", result);
+      httpRequestProcessed = true;
+      return;
+    }
+    
+    if (server.arg("net") == "submit") {
+      configNet();
+      server.client().setNoDelay(true);
+      server.sendHeader("Location", "/");
+      server.send(303, "text/plain", "See Other");
+      return;
+    }
+
 #ifdef _MQTT_SUPPORT
     if (server.hasArg("mqtt") && server.arg("mqtt") == "") {
       String result = F("<h4>MQTT</h4>");
@@ -535,7 +621,7 @@ void httpHandleDeviceListJss() {
   String script = F("function windowClick(e){if(e.target.className==\"dc\"&&e.target.id){modDlg(true,false,e.target.id);}}function modDlg(open,save,id){if(id=='back'){history.back();return;}document.onkeypress=(open?function(evt){evt=evt||window.event;var charCode=evt.keyCode||evt.which;if(charCode==27)modDlg(false,false);if(charCode==13)modDlg(false,true);}:null);var md=document.getElementById('mD');if(save){var form=document.getElementById('submitForm');if(form){form.submit();return;}form=document.getElementById('configForm');if(form){var aStr=form.action;var idx=aStr.indexOf('?');var url=aStr.substr(0, idx + 1);var params='';var elem;var parse;aStr=aStr.substr(idx + 1);while(1){idx=aStr.indexOf('&');if(idx>0)parse=aStr.substr(0, idx);else parse=aStr;");
   script += F("if(parse.substr(parse.length-1)!='='){params+=parse+'&';}else{elem=document.getElementsByName(parse.substr(0,parse.length-1));if(elem && elem[0])params+=parse+(elem[0].type!=\"checkbox\"?elem[0].value:(elem[0].checked?1:0))+'&';}if(idx>0) aStr=aStr.substr(idx+1); else break;}try{var xmlHttp=new XMLHttpRequest();xmlHttp.open('POST',url+params,false);xmlHttp.send(null);if(xmlHttp.status!=200){alert('Fehler: '+xmlHttp.statusText);return;}}catch(err){alert('Fehler: '+err.message);return;}}}if(open){try{var url='/config?ChipID=");
   script += getChipID();
-  script += F("&action=form';if(id.indexOf('schedule#')==0)url+='&schedule='+id.substr(9);else if(id=='mqtt'||id=='wifi'||id.indexOf('ota')==0||id=='resetSearch'||id=='serial')url+='&'+id+'=';else url+='&deviceID='+id;var xmlHttp=new XMLHttpRequest(); xmlHttp.open('POST',url,false);xmlHttp.send(null);if(xmlHttp.status != 200){alert('Fehler: '+xmlHttp.statusText);return;}if(id=='resetSearch'){window.location.reload();return;}document.getElementById('mDCC').innerHTML=xmlHttp.responseText;}catch(err){alert('Fehler: '+err.message);return;}}md.style.visibility=(open?'visible':'hidden');if(!open){document.getElementById('mDCC').innerHTML='';}}");
+  script += F("&action=form';if(id.indexOf('schedule#')==0)url+='&schedule='+id.substr(9);else if(id=='mqtt'||id=='wifi'||id.indexOf('ota')==0||id=='resetSearch'||id=='serial'||id=='net')url+='&'+id+'=';else url+='&deviceID='+id;var xmlHttp=new XMLHttpRequest(); xmlHttp.open('POST',url,false);xmlHttp.send(null);if(xmlHttp.status != 200){alert('Fehler: '+xmlHttp.statusText);return;}if(id=='resetSearch'){window.location.reload();return;}document.getElementById('mDCC').innerHTML=xmlHttp.responseText;}catch(err){alert('Fehler: '+err.message);return;}}md.style.visibility=(open?'visible':'hidden');if(!open){document.getElementById('mDCC').innerHTML='';}}");
   script += F("function filter(){var filter=document.getElementsByName('filter')[0];var table=document.getElementById('devices');if(filter&&table){var trs=document.getElementsByTagName('tr');i=1;while(trs[i]){trs[i].style.display=((filter.value&trs[i].firstChild.nodeValue)==filter.value||filter.value==255?'table-row':'none');i++;}}}");
   server.send(200, "text/javascript", script);
   httpRequestProcessed = true;

@@ -16,6 +16,7 @@
 #define classField       F(" class=")
 #define onChangeField    F(" onchange=");
 #define checkBox         "checkbox"
+#define ipAddress        "ipAddress"
 
 // prototypes
 String htmlForm(String html, String pAction, String pMethod, String pID="", String pEnctype="", String pLegend="");
@@ -49,6 +50,27 @@ String wifiForm() {
   html += htmlInput("ssid", "",  WiFi.SSID(), sizeof(current_conf.ssid)) + htmlNewLine();
   html += htmlLabel("password", "psk: ");
   html += htmlInput("password", "",  "", sizeof(current_conf.password)) + htmlNewLine();
+
+  return htmlForm(html, action, "post", "configForm");
+}
+
+String netForm() {
+  struct station_config current_conf;
+  
+  String action = F("/config?ChipID=");
+  action += getChipID();
+  action += F("&net=submit&hostname=&address=&mask=&gateway=&dns=");
+
+  String html = htmlLabel("hostname", "hostname: ");
+  html += htmlInput("hostname", "",  WiFi.hostname(), 32) + htmlNewLine();
+  html += htmlLabel("address", "ip: ");
+  html += htmlInput("address", ipAddress,  espConfig.getValue("address"), 15) + htmlNewLine();
+  html += htmlLabel("mask", "mask: ");
+  html += htmlInput("mask", ipAddress,  espConfig.getValue("mask"), 15) + htmlNewLine();
+  html += htmlLabel("gateway", "gateway: ");
+  html += htmlInput("gateway", ipAddress,  espConfig.getValue("gateway"), 15) + htmlNewLine();
+  html += htmlLabel("dns", "dns: ");
+  html += htmlInput("dns", ipAddress,  espConfig.getValue("dns"), 15) + htmlNewLine();
 
   return htmlForm(html, action, "post", "configForm");
 }
@@ -160,7 +182,7 @@ String htmlInput(String pName, String pType, String pValue, int pMaxLength, Stri
   result += textMark;
   result += typeField;
   result += textMark;
-  result += (pType != "" ? pType : "text");
+  result += (pType != "" && pType != ipAddress ? pType : "text");
   result += textMark;
   
   if (pValue != "") {
@@ -189,6 +211,8 @@ String htmlInput(String pName, String pType, String pValue, int pMaxLength, Stri
   }
   if (pValue == "1" && pType == checkBox)
     result += F(" checked");
+  if (pType == ipAddress)
+    result += " placeholder=\"0.0.0.0\" pattern=\"^(?:(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\\.){3}(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)$\"";
   result += F(">");
   
   return result;

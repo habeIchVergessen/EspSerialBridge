@@ -99,7 +99,15 @@ void EspDebug::loop() {
       case 'c':
         espSerialBridge.printDiag(espDebug);
         break;
+      case 'd':
+        espConfig.unsetValue("address");
+        espConfig.unsetValue("mask");
+        espConfig.unsetValue("gateway");
+        espConfig.unsetValue("dns");
+        if (!espConfig.hasChanged())
+          break;
       case 'r':
+        DBG_PRINTLN("restarting ESP");
         ESP.reset();
         break;
       case 'v':

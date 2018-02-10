@@ -94,7 +94,7 @@ String handleDeviceConfig(ESP8266WebServer *server, uint16_t *resultCode) {
 
     String html = "", options = "";
 
-    uint16_t baud = espSerialBridge.getBaud();
+    uint32_t baud = espSerialBridge.getBaud();
     html += htmlLabel(F("baud"), F("Baud: "));
     options = htmlOption(F("9600"), F("9600"), baud == 9600);
     options += htmlOption(F("19200"), F("19200"), baud == 19200);
