@@ -20,7 +20,7 @@
 
 // prototypes
 String htmlForm(String html, String pAction, String pMethod, String pID="", String pEnctype="", String pLegend="");
-String htmlInput(String pName, String pType, String pValue, int pMaxLength=0, String pMinNumber="", String pMaxNumber="");
+String htmlInput(String pName, String pType, String pValue, int pMaxLength=0, String pMinNumber="", String pMaxNumber="", String pPlaceHolder="");
 String htmlFieldSet(String pHtml, String pLegend="");
 String htmlOption(String pValue, String pText, bool pSelected=false);
 String htmlSelect(String pName, String pOptions, String pOnChange="");
@@ -62,7 +62,8 @@ String netForm() {
   action += F("&net=submit&hostname=&address=&mask=&gateway=&dns=");
 
   String html = htmlLabel("hostname", "hostname: ");
-  html += htmlInput("hostname", "",  WiFi.hostname(), 32) + htmlNewLine();
+  String hostname = WiFi.hostname(), defaultHostname = getDefaultHostname();
+  html += htmlInput("hostname", "",  (hostname == defaultHostname ? "" : hostname), 32, "", "", defaultHostname) + htmlNewLine();
   html += htmlLabel("address", "ip: ");
   html += htmlInput("address", ipAddress,  espConfig.getValue("address"), 15) + htmlNewLine();
   html += htmlLabel("mask", "mask: ");
@@ -174,7 +175,7 @@ String htmlLabel(String pFor, String pText) {
   return result;
 }
 
-String htmlInput(String pName, String pType, String pValue, int pMaxLength, String pMinNumber, String pMaxNumber) {
+String htmlInput(String pName, String pType, String pValue, int pMaxLength, String pMinNumber, String pMaxNumber, String pPlaceHolder) {
   String result = F("<input ");
   result += nameField;
   result += textMark;
@@ -213,6 +214,8 @@ String htmlInput(String pName, String pType, String pValue, int pMaxLength, Stri
     result += F(" checked");
   if (pType == ipAddress)
     result += " placeholder=\"0.0.0.0\" pattern=\"^(?:(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\\.){3}(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)$\"";
+  if (pPlaceHolder != "")
+    result += " placeholder=\"" + pPlaceHolder + "\"";
   result += F(">");
   
   return result;

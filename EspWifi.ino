@@ -88,10 +88,16 @@ void setupEspWifi() {
 }
 
 void loopEspWifi() {
+  // apply net config changes
   if (netConfigChanged) {
     // spend some time for http clients
     delay(2000);
+    
+    String hostname = espConfig.getValue("hostname");
+    if (hostname != "")
+      WiFi.hostname(hostname);
     setupWifi();
+    
     yield();
     netConfigChanged = false;
   }
@@ -218,6 +224,15 @@ void reconfigWifi(String ssid, String password) {
 }
 
 void configNet() {
+  String hostname = server.arg("hostname"), defaultHostname = getDefaultHostname();
+  if (hostname == "" || hostname == defaultHostname) {
+  // reset to default
+    espConfig.unsetValue("hostname");
+    if (defaultHostname != WiFi.hostname())
+      WiFi.hostname(defaultHostname);
+  } else
+    espConfig.setValue("hostname", hostname.c_str());
+  
   IPAddress ip, mask, gw, dns;
 
   if (!ip.fromString(server.arg("address")) || !mask.fromString(server.arg("mask"))) {
@@ -671,6 +686,15 @@ String ipString(IPAddress ip) {
 String getChipID() {
   char buf[10];
   sprintf(buf, "%08d", (unsigned int)ESP.getChipId());
+  return String(buf);
+}
+
+String getDefaultHostname() {
+  uint8_t mac[6];
+  char buf[11];
+  WiFi.macAddress(mac);
+  sprintf(buf, "ESP_%02X%02X%02X", mac[3], mac[4], mac[5]);
+
   return String(buf);
 }
 
