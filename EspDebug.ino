@@ -111,7 +111,7 @@ void EspDebug::loop() {
         ESP.reset();
         break;
       case 'v':
-        DBG_PRINTLN("version: " + String(PROGNAME) + " " + String(PROGVERS) + "@" + getChipID());
+        DBG_PRINTLN("version: " + String(PROGNAME) + " v" + String(PROGVERS) + "@" + getChipID() + " (" + String(PROGBUILD) + ")");
       case 'u':
         DBG_PRINTLN("uptime: " + uptime());
         break;
