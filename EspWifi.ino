@@ -917,11 +917,13 @@ void httpHandleOTAatmega328() {
     DBG_PRINT("starting Update: ");
     DBG_FORCE_OUTPUT();
 
+    uint8_t txPin = 1;
 #ifdef _ESPSERIALBRIDGE_SUPPORT
     espSerialBridge.enableClientConnect(false);
+    txPin = espSerialBridge.getTxPin();
 #endif
 
-    FlashATmega328 flashATmega328(2);
+    FlashATmega328 flashATmega328(2, txPin);
 
     flashATmega328.flashFile(&otaFile);
 

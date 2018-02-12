@@ -13,6 +13,7 @@
 
 #ifdef _ESPSERIALBRIDGE_SUPPORT
   #define _OTA_ATMEGA328_SERIAL
+//  #define _TARGET_ESP_01  // no gpio15 for serial use
 #endif
 
 #include "EspConfig.h"
@@ -131,7 +132,9 @@ String handleDeviceConfig(ESP8266WebServer *server, uint16_t *resultCode) {
     uint8_t tx_pin = espSerialBridge.getTxPin();
     html += htmlLabel(F("pins"), F("TX/RX: "));
     options = htmlOption(F("normal"), F("normal (1/3)"), tx_pin == 1);
+#ifndef _TARGET_ESP_01
     options += htmlOption(F("swapped"), F("swapped (15/13)"), tx_pin == 15);
+#endif
     html += htmlSelect(F("pins"), options) + htmlNewLine();
     action += F("&pins=");
 

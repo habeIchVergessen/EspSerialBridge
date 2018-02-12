@@ -1,7 +1,8 @@
 #include "FlashATmega328Serial.h";
 
-FlashATmega328::FlashATmega328(uint8_t dtrPort) {
+FlashATmega328::FlashATmega328(uint8_t dtrPort, uint8_t txPin) {
   m_dtrPort = dtrPort;
+  m_SerialTxPin = txPin;
 }
 
 FlashATmega328::~FlashATmega328() {
@@ -11,7 +12,8 @@ FlashATmega328::~FlashATmega328() {
 
 void FlashATmega328::setupSerial(int baud) {
   Serial.begin(baud, SERIAL_8N1);
-  Serial.pins(15, 13);
+  if (m_SerialTxPin == 15)
+    Serial.pins(15, 13);
 
   yield();
   

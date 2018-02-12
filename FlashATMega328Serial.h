@@ -6,7 +6,7 @@
 
 class FlashATmega328 {
   public:
-    FlashATmega328(uint8_t dtrPort);
+    FlashATmega328(uint8_t dtrPort, uint8_t txPin=1);
     ~FlashATmega328();
 
     void flashFile(File *input);
@@ -63,6 +63,7 @@ class FlashATmega328 {
     unsigned long m_resetMillis;
     uint8_t m_dtrPort;
     int m_BaudRateAtReset = -1;
+    int m_SerialTxPin = 1;
 
     bool stkGetSync();
     bool stkGetParameter(uint8_t parameter, uint8_t *value);
