@@ -76,7 +76,7 @@ void handleInput(char r, bool hasValue, unsigned long value, bool hasValue2, uns
       printHeapFree();
       break;
     case 'v':
-      DBG_PRINTF("[%s.%s] compiled at \n", String(PROGNAME).c_str(), String(PROGVERS).c_str(), String(PROGBUILD).c_str());
+      DBG_PRINTF("[%s.%s] compiled at %s\n", String(PROGNAME).c_str(), String(PROGVERS).c_str(), String(PROGBUILD).c_str());
       break;
     case ' ':
     case '\n':
