@@ -54,8 +54,25 @@ void EspSerialBridge::loop() {
     return;
   }
   
+  // probe new client
+  if (m_WifiServer.hasClient()) {
+    WiFiClient wifiClient = m_WifiServer.available();
+
+    // discarding connection attempts if client is connected/not enabled
+    if (!m_enableClient || m_WifiClient.status() != CLOSED) {
+      wifiClient.stop();
+    } else {
+    // accept new connection
+      m_WifiClient = wifiClient;
+      m_WifiClient.setNoDelay(true);
+#ifdef _ESPSERIALBRIDGE_TELNET_SUPPORT
+      enableSessionDetection();
+#endif  // _ESPSERIALBRIDGE_TELNET_SUPPORT
+    }
+  }
+
   // copy serial input to buffer
-  while (m_enableReceive && Serial.available()) {
+  while (Serial.available() && (m_inPos + 1 < m_bufferSize)) {
     int data = Serial.read();
     
     if (data >= 0) {
@@ -63,6 +80,12 @@ void EspSerialBridge::loop() {
       m_inPos++;
     } else
       break;
+  }
+
+  // we have no client connected (clear buffer)
+  if (m_WifiClient.status() == CLOSED) {
+    m_inPos = 0;
+    return;
   }
 
   // output to network
@@ -112,23 +135,6 @@ void EspSerialBridge::loop() {
       msg += " " + String((byte)(data[i] & 0xff), HEX);
     espDebug.println(msg);
 #endif
-  }
-  
-  // probe new client
-  if (m_WifiServer.hasClient()) {
-    WiFiClient wifiClient = m_WifiServer.available();
-
-    // discarding connection attempts if client is connected/not enabled
-    if (!m_enableClient || m_WifiClient.status() != CLOSED) {
-      wifiClient.stop();
-    } else {
-    // accept new connection
-      m_WifiClient = wifiClient;
-      m_WifiClient.setNoDelay(true);
-#ifdef _ESPSERIALBRIDGE_TELNET_SUPPORT
-      enableSessionDetection();
-#endif  // _ESPSERIALBRIDGE_TELNET_SUPPORT
-    }
   }
 }
 

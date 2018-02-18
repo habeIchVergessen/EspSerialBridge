@@ -34,7 +34,7 @@ class EspSerialBridge {
     unsigned long getBaud();
     SerialConfig getSerialConfig();
 
-    void enableReceive(bool enable=true) { m_enableReceive = enable; };
+//    void enableReceive(bool enable=true) { m_enableReceive = enable; };
     void enableClientConnect(bool enable=true);
 
     void printDiag(Print& dest);
@@ -46,7 +46,7 @@ class EspSerialBridge {
     static const unsigned int m_bufferSize=256;
     byte m_buffer[m_bufferSize];
     uint16_t m_inPos = 0;
-    bool m_enableReceive = true;
+//    bool m_enableReceive = true;
     bool m_enableClient = true;
 
     WiFiServer m_WifiServer = NULL;
