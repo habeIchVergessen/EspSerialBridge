@@ -33,7 +33,7 @@ size_t EspDebug::write(uint8_t data) {
 size_t EspDebug::write(const uint8_t *buffer, size_t size) {
   size_t result = 0;
 
-  if (!m_setupLog && m_DbgClient.status() == CLOSED)
+  if (!m_serialOut && !m_setupLog && m_DbgClient.status() == CLOSED)
     return -1;
     
   for (size_t i=0; i<size; i++) {
@@ -89,34 +89,8 @@ void EspDebug::loop() {
   sendBuffer();  
 
   // input from network
-  int recv;
-  while ((recv = m_DbgClient.available()) > 0) {
-    byte data[128];      
-    int dataRead = m_DbgClient.read(data, (recv >= sizeof(data) ? sizeof(data) : recv));
-
-    // handle input (TODO)
-    switch(data[0]) {
-      case 'c':
-        espSerialBridge.printDiag(espDebug);
-        break;
-      case 'd':
-        espConfig.unsetValue("address");
-        espConfig.unsetValue("mask");
-        espConfig.unsetValue("gateway");
-        espConfig.unsetValue("dns");
-        if (!espConfig.hasChanged())
-          break;
-      case 'r':
-        DBG_PRINTLN("restarting ESP");
-        ESP.reset();
-        break;
-      case 'v':
-        DBG_PRINTLN("version: " + String(PROGNAME) + " v" + String(PROGVERS) + "@" + getChipID() + " (" + String(PROGBUILD) + ")");
-      case 'u':
-        DBG_PRINTLN("uptime: " + uptime());
-        break;
-    }
-  }
+  while (m_DbgClient.available() > 0 && m_inputCallback != NULL)
+    m_inputCallback(&m_DbgClient);
 }
 
 void EspDebug::sendWriteBuffer() {
@@ -132,6 +106,9 @@ void EspDebug::sendBuffer() {
   if (m_inPos == 0)
     return;
 
+  if (m_serialOut)
+    Serial.write(&m_buffer[0], m_inPos);
+    
   if (m_DbgClient.status() == CLOSED) {
     if (!m_setupLog)
       m_inPos = 0;

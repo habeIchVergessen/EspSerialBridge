@@ -3,11 +3,11 @@
 #define _DEBUG
 #ifdef _DEBUG
 //  #define _DEBUG_TRAFFIC
+//  #define _DEBUG_HEAP
 #endif
 //#define _DEBUG_HTTP
 
 // wifi options
-#define _OTA_NO_SPIFFS
 #define _ESP_WIFI_UDP_MULTICAST_DISABLED
 #define _ESPSERIALBRIDGE_SUPPORT
 
@@ -22,7 +22,7 @@
 #include "EspWifi.h"
 
 #define PROGNAME "EspSerialBridge"
-#define PROGVERS "0.1b"
+#define PROGVERS "0.2"
 #define PROGBUILD String(__DATE__) + " " + String(__TIME__)
 
 bool httpRequestProcessed     = false;
@@ -41,6 +41,7 @@ void setup() {
   registerDeviceConfigCallback(handleDeviceConfig);
 
   espDebug.begin();
+  espDebug.registerInputCallback(handleInputStream);
 }
 
 void loop(void) {
@@ -70,6 +71,13 @@ void printHeapFree() {
 
 void handleInput(char r, bool hasValue, unsigned long value, bool hasValue2, unsigned long value2) {
   switch (r) {
+    case 'u':
+      DBG_PRINTLN("uptime: " + uptime());
+      printHeapFree();
+      break;
+    case 'v':
+      DBG_PRINTF("[%s.%s] compiled at \n", String(PROGNAME).c_str(), String(PROGVERS).c_str(), String(PROGBUILD).c_str());
+      break;
     case ' ':
     case '\n':
     case '\r':
@@ -79,6 +87,74 @@ void handleInput(char r, bool hasValue, unsigned long value, bool hasValue2, uns
     }
 }
 
+void handleInputStream(Stream *input) {
+  if (input->available() <= 0)
+    return;
+
+  static long value, value2;
+  bool hasValue, hasValue2;
+  char r = input->read();
+
+  // reset variables
+  value = 0; hasValue = false;
+  value2 = 0; hasValue2 = false;
+  
+  byte sign = 0;
+  // char is a number
+  if ((r >= '0' && r <= '9') || r == '-'){
+    byte delays = 2;
+    while ((r >= '0' && r <= '9') || r == ',' || r == '-') {
+      if (r == '-') {
+        sign = 1;
+      } else {
+        // check value separator
+        if (r == ',') {
+          if (!hasValue || hasValue2) {
+            print_warning(2, "format");
+            return;
+          }
+          
+          hasValue2 = true;
+          if (sign == 0) {
+            value = value * -1;
+            sign = 0;
+          }
+        } else {
+          if (!hasValue || !hasValue2) {
+            value = value * 10 + (r - '0');
+            hasValue = true;
+          } else {
+            value2 = value2 * 10 + (r - '0');
+            hasValue2 = true;
+          }
+        }
+      }
+            
+      // wait a little bit for more input
+      while (input->available() <= 0 && delays > 0) {
+        delay(20);
+        delays--;
+      }
+
+      // more input available
+      if (delays == 0 && input->available() <= 0) {
+        return;
+      }
+
+      r = input->read();
+    }
+  }
+
+  // Vorzeichen
+  if (sign == 1) {
+    if (hasValue && !hasValue2)
+      value = value * -1;
+    if (hasValue && hasValue2)
+      value2 = value2 * -1;
+  }
+
+  handleInput(r, hasValue, value, hasValue2, value2);
+}
 
 String handleDeviceConfig(ESP8266WebServer *server, uint16_t *resultCode) {
   String result = "";
@@ -172,5 +248,25 @@ String handleDeviceConfig(ESP8266WebServer *server, uint16_t *resultCode) {
   }
 
   return result;
+}
+
+// helper
+void print_config() {
+  String blank = F(" ");
+  
+  DBG_PRINT(F("config:"));
+  DBG_PRINTLN();
+}
+
+void print_warning(byte type, String msg) {
+  return;
+  DBG_PRINT(F("\nwarning: "));
+  if (type == 1)
+    DBG_PRINT(F("skipped incomplete command "));
+  if (type == 2)
+    DBG_PRINT(F("wrong parameter "));
+  if (type == 3)
+    DBG_PRINT(F("failed: "));
+  DBG_PRINTLN(msg);
 }
 

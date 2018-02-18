@@ -17,6 +17,8 @@
   #define DBG_FORCE_OUTPUT() { }
 #endif
 
+typedef void (*HandleInputCallback) (Stream *input);
+
 #include <WiFiServer.h>
 #include <WiFiClient.h>
 #include <ESP8266WiFi.h>
@@ -30,6 +32,9 @@ class EspDebug : public Stream {
     void loop();
     void sendWriteBuffer();
     void bufferedWrite(boolean enable=true);
+    void enableSerialOutput(bool enable=true) { m_serialOut = enable; };
+
+    void registerInputCallback(HandleInputCallback inputCallback) { m_inputCallback = inputCallback; };
 
     // Stream overrides
     int available() override;
@@ -53,6 +58,9 @@ class EspDebug : public Stream {
     uint16_t m_inPos = 0;
     boolean m_bufferedWrite = true;
     boolean m_setupLog = true;
+    boolean m_serialOut = false;
+
+    HandleInputCallback m_inputCallback = NULL;
 
     WiFiServer m_DbgServer = NULL;
     WiFiClient m_DbgClient;
