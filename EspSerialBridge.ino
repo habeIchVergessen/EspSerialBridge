@@ -4,6 +4,8 @@
 #ifdef _DEBUG
 //  #define _DEBUG_TRAFFIC
 //  #define _DEBUG_HEAP
+//  #define _DEBUG_WIFI_SETTINGS  // enable WiFi.setAutoConnect and .printDiag on debug console
+//  #define _DEBUG_ESP            // enable ESP.reset on debug console
 #endif
 //#define _DEBUG_HTTP
 
@@ -12,7 +14,7 @@
 #define _ESPSERIALBRIDGE_SUPPORT
 
 #ifdef _ESPSERIALBRIDGE_SUPPORT
-  #define _OTA_ATMEGA328_SERIAL
+  #define _OTA_ATMEGA328_SERIAL // enable atmega328 OTA
 //  #define _TARGET_ESP_01  // no gpio15 for serial use
 #endif
 
@@ -71,6 +73,19 @@ void printHeapFree() {
 
 void handleInput(char r, bool hasValue, unsigned long value, bool hasValue2, unsigned long value2) {
   switch (r) {
+#ifdef _DEBUG_WIFI_SETTINGS
+    case 'a':
+      WiFi.setAutoConnect(true);
+      break;
+    case 'd':
+      WiFi.printDiag(espDebug);
+      break;
+#endif
+#ifdef _DEBUG_ESP
+    case 'R':
+      ESP.reset();
+      break;
+#endif
     case 'u':
       DBG_PRINTLN("uptime: " + uptime());
       printHeapFree();
