@@ -488,5 +488,3 @@ void EspSerialBridge::telnetResponse(uint8_t *response, size_t responseSize) {
 }
 
 #endif  // _ESPSERIALBRIDGE_TELNET_SUPPORT
-
-

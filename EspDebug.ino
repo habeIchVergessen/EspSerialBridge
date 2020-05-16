@@ -4,7 +4,8 @@ EspDebug::EspDebug() {
 }
 
 EspDebug::~EspDebug() {
-#ifdef ESP8266
+//#if defined(ESP8266) || defined(ESP32)
+#ifdef DBG_PRINTER_NET
   m_DbgServer = NULL;
 #endif
 }
@@ -14,7 +15,8 @@ EspDebug::~EspDebug() {
 int EspDebug::available() {
   int result = -1;
   
-#ifdef ESP8266
+//#if defined(ESP8266) || defined(ESP32)
+#ifdef DBG_PRINTER_NET
   result = m_DbgClient.available();
 #endif
 
@@ -24,7 +26,8 @@ int EspDebug::available() {
 int EspDebug::read() {
   int result = -1;
   
-#ifdef ESP8266
+//#if defined(ESP8266) || defined(ESP32)
+#ifdef DBG_PRINTER_NET
   result = m_DbgClient.read();
 #endif
 
@@ -34,7 +37,8 @@ int EspDebug::read() {
 int EspDebug::peek() {
   int result = -1;
 
-#ifdef ESP8266
+//#if defined(ESP8266) || defined(ESP32)
+#ifdef DBG_PRINTER_NET
   result = m_DbgClient.peek();
 #endif
 
@@ -42,7 +46,8 @@ int EspDebug::peek() {
 }
 
 void EspDebug::flush() {
-#ifdef ESP8266
+//#if defined(ESP8266) || defined(ESP32)
+#ifdef DBG_PRINTER_NET
   m_DbgClient.flush();
 #endif
 }
@@ -60,14 +65,16 @@ size_t EspDebug::write(const uint8_t *buffer, size_t size) {
     
   for (size_t i=0; i<size; i++) {
     // force send
-    if (m_inPos == m_bufferSize) {
-      if (m_setupLog)
-        m_setupLog = false;
-      sendBuffer();
-    }
-
     if (m_inPos == m_bufferSize)
+      sendBuffer();
+
+    // probe send result
+    if (m_inPos == m_bufferSize) {
+      // write all to Serial
+      if (m_serialOut)
+        result = Serial.write(&buffer[i], (size - i));
       return result;
+    }
 
     m_buffer[m_inPos] = buffer[i];
     m_inPos++;
@@ -84,15 +91,19 @@ size_t EspDebug::write(const uint8_t *buffer, size_t size) {
 bool EspDebug::dbgClientClosed() {
   bool result = false;
 
-#ifdef ESP8266
+#if defined(DBG_PRINTER_NET) && defined(ESP8266)
   result = m_DbgClient.status() == CLOSED;
+#endif
+#if defined(DBG_PRINTER_NET) && defined(ESP32)
+  result = !m_DbgClient.connected();
 #endif
 
   return result;
 }
 
 void EspDebug::begin(uint16_t dbgServerPort) {
-#ifdef ESP8266
+//#if defined(ESP8266) || defined(ESP32)
+#ifdef DBG_PRINTER_NET
   m_DbgServer = WiFiServer(dbgServerPort);
   m_DbgServer.begin();
   m_DbgServer.setNoDelay(true);
@@ -100,12 +111,9 @@ void EspDebug::begin(uint16_t dbgServerPort) {
 }
 
 void EspDebug::loop() {
-  // stop setup log on first loop call
-//  if (m_setupLog)
-//    m_setupLog = false;
-    
   // probe new client
-#ifdef ESP8266
+//#if defined(ESP8266) || defined(ESP32)
+#ifdef DBG_PRINTER_NET
   if (m_DbgServer.hasClient()) {
     WiFiClient dbgClient = m_DbgServer.available();
 
@@ -119,8 +127,13 @@ void EspDebug::loop() {
       m_DbgClient = dbgClient;
       m_DbgClient.setNoDelay(true);
 
-      if (m_inPos == m_bufferSize)
-        print("\n...\n\n");
+      // force send
+      if (m_SetupLogData != "") {
+          m_DbgClient.write(m_SetupLogData.c_str(), m_SetupLogData.length());
+          if (m_SetupLogData.length() == m_bufferSize)
+            m_DbgClient.write("\n...\n\n");
+          m_SetupLogData = "";
+      }
     }
   }
 #endif
@@ -129,7 +142,8 @@ void EspDebug::loop() {
   sendBuffer();  
 
   // input from network
-#ifdef ESP8266
+//#if defined(ESP8266) || defined(ESP32)
+#ifdef DBG_PRINTER_NET
   while (m_DbgClient.available() > 0 && m_inputCallback != NULL)
     m_inputCallback(&m_DbgClient);
 #endif
@@ -148,15 +162,22 @@ void EspDebug::sendBuffer() {
   if (m_inPos == 0)
     return;
 
-#ifdef ESP8266
-  if (m_serialOut && !m_setupLog)
-#endif
-    Serial.write(&m_buffer[0], m_inPos);
+  if (m_serialOut) {
+    int wrote = Serial.write(&m_buffer[m_SerialOut], (m_inPos - m_SerialOut));
+    if (wrote > 0)
+      m_SerialOut += wrote;
+  }
     
-#ifdef ESP8266
+//#if defined(ESP8266) || defined(ESP32)
+#ifdef DBG_PRINTER_NET
   if (dbgClientClosed()) {
+    if (m_setupLog && m_inPos == m_bufferSize) {
+      m_buffer[m_inPos] = 0;
+      m_SetupLogData = String((char*)m_buffer);
+      m_setupLog = false;
+    }
     if (!m_setupLog)
-      m_inPos = 0;
+      m_inPos = m_SerialOut = 0;
     return;
   }
 
@@ -166,9 +187,10 @@ void EspDebug::sendBuffer() {
   if (socketSend < m_inPos) {
     memcpy(&m_buffer[0], &m_buffer[socketSend], (m_inPos - socketSend));
     m_inPos -= socketSend;
+    m_SerialOut -= socketSend;
   } else
 #endif
-    m_inPos = 0;
+    m_inPos = m_SerialOut = 0;
 }
 
 

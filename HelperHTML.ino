@@ -1,36 +1,17 @@
-#ifdef ESP8266
+#if defined(ESP8266) || defined(ESP32)
+
+#include "HelperHTML.h"
 
 #ifdef _MQTT_SUPPORT
   #include "EspConfig.h"
 #endif
 
-#define textMark         F("\"")
-#define actionField      F(" action=")
-#define enctypeField     F(" enctype=")
-#define maxLengthField   F(" maxlength=")
-#define minField         F(" min=")
-#define maxField         F(" max=")
-#define methodField      F(" method=")
-#define nameField        F(" name=")
-#define typeField        F(" type=")
-#define valueField       F(" value=")
-#define idField          F(" id=")
-#define classField       F(" class=")
-#define onChangeField    F(" onchange=");
-#define checkBox         "checkbox"
-#define ipAddress        "ipAddress"
-
-// prototypes
-String htmlForm(String html, String pAction, String pMethod, String pID="", String pEnctype="", String pLegend="");
-String htmlInput(String pName, String pType, String pValue, int pMaxLength=0, String pMinNumber="", String pMaxNumber="", String pPlaceHolder="");
-String htmlFieldSet(String pHtml, String pLegend="");
-String htmlOption(String pValue, String pText, bool pSelected=false);
-String htmlSelect(String pName, String pOptions, String pOnChange="");
-
 String htmlBody(String html) {
-  String doc = F("<!DOCTYPE html><html lang=\"de\"><body>");
-  doc += F("<head>\n<link rel=\"stylesheet\" type=\"text/css\" href=\"/static/deviceList.css\">\n<script type=\"text/javascript\" src=\"/static/deviceList.js\"></script>\n</head>");
-  doc += F("<body onclick=\"javascript:windowClick(event)\"><center><div style=\"width: 30em;\">");
+  String doc = F("<!DOCTYPE html><html lang=\"de\">");
+  doc += F("<head>\n");
+  doc += htmlStyle("/static/deviceList.css");
+  doc += htmlScript("/static/deviceList.js");
+  doc += F("</head><body onclick=\"javascript:windowClick(event)\"><center><div style=\"width: 30em;\">");
   doc += "<h1>"; doc += PROGNAME; doc += " v"; doc += PROGVERS; doc += "@" + getChipID() + "</h1>";
   html.replace("\n", "<br>");
   doc += html;
@@ -42,7 +23,12 @@ String htmlBody(String html) {
 }
 
 String wifiForm() {
+#ifdef ESP8266
   struct station_config current_conf;
+#endif
+#ifdef ESP32
+  wifi_sta_config_t current_conf;
+#endif
   
   String action = F("/config?ChipID=");
   action += getChipID();
@@ -57,14 +43,12 @@ String wifiForm() {
 }
 
 String netForm() {
-  struct station_config current_conf;
-  
   String action = F("/config?ChipID=");
   action += getChipID();
   action += F("&net=submit&hostname=&address=&mask=&gateway=&dns=");
 
   String html = htmlLabel("hostname", "hostname: ");
-  String hostname = WiFi.hostname(), defaultHostname = getDefaultHostname();
+  String hostname = getHostname(), defaultHostname = getDefaultHostname();
   html += htmlInput("hostname", "",  (hostname == defaultHostname ? "" : hostname), 32, "", "", defaultHostname) + htmlNewLine();
   html += htmlLabel("address", "ip: ");
   html += htmlInput("address", ipAddress,  espConfig.getValue("address"), 15) + htmlNewLine();
@@ -74,6 +58,27 @@ String netForm() {
   html += htmlInput("gateway", ipAddress,  espConfig.getValue("gateway"), 15) + htmlNewLine();
   html += htmlLabel("dns", "dns: ");
   html += htmlInput("dns", ipAddress,  espConfig.getValue("dns"), 15) + htmlNewLine();
+
+  return htmlForm(html, action, "post", "configForm");
+}
+
+String toCheckboxValue(String value) {
+  return (value == NULL || value == "1" ? "1" : "0");
+}
+
+String optionForm() {
+  String action = F("/config?ChipID=");
+  action += getChipID();
+  action += F("&options=submit&http=&kvpudp=&mqtt=&debug=");
+
+  String html = htmlLabel("http", "http: ");
+  html += htmlInput("http", checkBox, toCheckboxValue(espConfig.getValue("http"))) + htmlNewLine();
+  html += htmlLabel("kvpudp", "kvpudp: ");
+  html += htmlInput("kvpudp", checkBox, toCheckboxValue(espConfig.getValue("kvpudp"))) + htmlNewLine();
+  html += htmlLabel("mqtt", "mqtt: ");
+  html += htmlInput("mqtt", checkBox, toCheckboxValue(espConfig.getValue("mqtt"))) + htmlNewLine();
+  html += htmlLabel("debug", "debug: ");
+  html += htmlInput("debug", checkBox, toCheckboxValue(espConfig.getValue("debug"))) + htmlNewLine();
 
   return htmlForm(html, action, "post", "configForm");
 }
@@ -106,16 +111,6 @@ String flashForm() {
 
   return htmlForm(html, action, "post", "submitForm", "multipart/form-data");
 }
-
-#ifdef _OTA_ATMEGA328_SERIAL
-String flashAddonForm() {
-  String action = F("/ota/atmega328.bin");
-
-  String html = htmlInput("file", "file", "", 0) + htmlNewLine();
-
-  return htmlForm(html, action, "post", "submitForm", "multipart/form-data");
-}
-#endif
 
 String htmlForm(String html, String pAction, String pMethod, String pID, String pEnctype, String pLegend) {
   String result = F("<form");
@@ -243,7 +238,23 @@ String htmlButton(String pType, String pName, String pValue, String pText) {
   return result;
 }
 
-String htmlAnker(String pId, String pClass, String pText) {
+String htmlStyle(String hRef) {
+  String result = F("<link rel=\"stylesheet\" type=\"text/css\" href=\"");
+  result += hRef;
+  result += F("\">\n");
+
+  return result;
+}
+
+String htmlScript(String src) {
+  String result = F("<script type=\"text/javascript\" src=\"");
+  result += src;
+  result += F("\"></script>\n");
+
+  return result;
+}
+
+String htmlAnker(String pId, String pClass, String pText, String href) {
   String result = F("<a ");
 
   if (pId != "") {
@@ -259,12 +270,23 @@ String htmlAnker(String pId, String pClass, String pText) {
     result += pClass;
     result += textMark;
   }
+  
+  if (href != "") {
+    result += hrefField;
+    result += textMark;
+    result += href;
+    result += textMark;
+  }
 
   result += F(">");
   result += pText;
   result += F("</a>");
   
   return result;  
+}
+
+String htmlMenuItem(String pId, String pText) {
+  return htmlAnker(pId, "dc", pText);
 }
 
 String htmlOption(String pValue, String pText) {
@@ -309,5 +331,5 @@ String htmlSelect(String pName, String pOptions, String pOnChange) {
   return result;
 }
 
-#endif  // ESP8266
+#endif  // ESP8266 || ESP32
 

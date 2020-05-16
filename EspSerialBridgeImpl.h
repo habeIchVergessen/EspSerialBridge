@@ -8,6 +8,7 @@
 
 #include "EspDebug.h"
 #include "EspConfig.h"
+#include "EspWiFi.h"
 
 //#define _ESPSERIALBRIDGE_TELNET_SUPPORT
 

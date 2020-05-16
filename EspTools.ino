@@ -2,6 +2,9 @@
   #if defined(ARDUINO_AVR_UNO) || defined(ARDUINO_AVR_NANO)
     #define BUILTIN_LED 9
   #endif
+  #ifdef ESP32
+    #define BUILTIN_LED 2
+  #endif
 #endif
 
 void setupEspTools() {

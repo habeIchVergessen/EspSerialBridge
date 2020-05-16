@@ -3,9 +3,13 @@
 
 #include "Arduino.h"
 
-#ifdef ESP8266
+#if defined(ESP8266) || defined(ESP32)
 
 #include "FS.h"
+
+#ifdef ESP32
+  #include "SPIFFS.h"
+#endif
 
 class EspDeviceConfig;
 
@@ -14,12 +18,14 @@ public:
   EspConfig(String appName);
   ~EspConfig();
 
+  void    setup();
   String  getValue(String name);
   void    setValue(String name, String value);
   void    unsetValue(String name);
   void    unsetAll();
   bool    saveToFile();
   bool    hasChanged() { return configChanged; };
+  bool    spiffsMounted() { return mSpiffsMounted; };
   
   EspDeviceConfig   getDeviceConfig(String deviceName);
   
@@ -30,7 +36,7 @@ protected:
     ConfigList  *next;
   };
 
-  bool          configChanged = false;
+  bool          configChanged = false, mSpiffsMounted=false;
   ConfigList    *first = NULL;
   String        mAppName;
 
@@ -39,6 +45,7 @@ protected:
   String fileName() { return "/config/" + mAppName + ".cfg"; };
   bool openRead();
   bool openWrite();
+  bool loadData();
 };
 
 class EspDeviceConfig : public EspConfig {
@@ -48,6 +55,6 @@ public:
 
 extern EspConfig espConfig;
 
-#endif  // ESP8266
+#endif  // ESP8266 || ESP32
 
 #endif	// _ESP_CONFIG_H

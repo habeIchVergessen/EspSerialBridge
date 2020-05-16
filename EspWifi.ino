@@ -1,95 +1,68 @@
-#ifdef ESP8266
+#if defined(ESP8266) || defined(ESP32)
 
-#include "Arduino.h"
 #include "EspWifi.h"
-#include "ESP8266WiFi.h"
-#include "WiFiClient.h"
-#include "ESP8266mDNS.h"
-#include "WiFiUDP.h"
-#include "FS.h"
-#include "detail/RequestHandlersImpl.h"
 
-#include "EspConfig.h"
-
-#ifdef _MQTT_SUPPORT
-  #include "EspMqtt.h"
-#endif
-
-#ifdef _OTA_ATMEGA328_SERIAL
-  #include "IntelHexFormatParser.h"
-  #include "FlashATMega328Serial.h"
-
-  IntelHexFormatParser *intelHexFormatParser = NULL;
-#endif
-
-extern "C" {
-#include "user_interface.h"
+EspWiFi::EspWiFi() {
 }
 
-#if defined(_ESP1WIRE_SUPPORT) || defined(_ESPSERIALBRIDGE_SUPPORT)
-DeviceConfigCallback deviceConfigCallback = NULL;
-void registerDeviceConfigCallback(DeviceConfigCallback callback) {
-  deviceConfigCallback = callback;
-}
-#endif
-
-#ifdef _ESP1WIRE_SUPPORT
-DeviceListCallback deviceListCallback = NULL;
-void registerDeviceListCallback(DeviceListCallback callback) {
-  deviceListCallback = callback;
+void EspWiFi::setup() {
+  espWiFi.setupInternal();
 }
 
-DeviceConfigCallback scheduleConfigCallback = NULL;
-void registerScheduleConfigCallback(DeviceConfigCallback callback) {
-  scheduleConfigCallback = callback;
+void EspWiFi::setHostname(String hostname) {
+#ifdef ESP8266
+  WiFi.hostname(hostname);
+#endif  
+#ifdef ESP32
+  WiFi.setHostname(hostname.c_str());
+#endif  
 }
 
-DeviceListCallback scheduleListCallback = NULL;
-void registerScheduleListCallback(DeviceListCallback callback) {
-  scheduleListCallback = callback;
-}
-#endif  // _ESP1WIRE_SUPPORT
-
-// source: http://esp8266-re.foogod.com/wiki/SPI_Flash_Format
-typedef struct __attribute__((packed))
-{
-  uint8   magic;
-  uint8   unknown;
-  uint8   flash_mode;
-  uint8   flash_size_speed;
-  uint32  entry_addr;
-} HeaderBootMode1;
-
-// globals
-String otaFileName;
-File otaFile;
-bool lastWiFiStatus = false;
-
-// Multicast declarations
-IPAddress ipMulti(239, 0, 0, 57);
-unsigned int portMulti = 12345;      // local port to listen on
-
-// net config changed (loop has to handle it)
-bool netConfigChanged = false;
-
-WiFiUDP WiFiUdp;
-ESP8266WebServer server(80);
-
-void setupEspWifi() {
+void EspWiFi::setupInternal() {
   String hostname = espConfig.getValue("hostname");
   if (hostname != "")
-    WiFi.hostname(hostname);
+    setHostname(hostname);
 
-  DBG_PRINT("Hostname: "); DBG_PRINTLN(WiFi.hostname());
+#ifdef ESP32
+  // overwrite default hostname
+  if (hostname == "") {
+    WiFi.config(INADDR_NONE, INADDR_NONE, INADDR_NONE);
+    setHostname(getDefaultHostname());
+  }
+#endif
+
+  DBG_PRINT("Hostname: "); DBG_PRINTLN(getHostname());
   DBG_PRINT("MAC:      "); DBG_PRINTLN(WiFi.macAddress());
+
+#ifdef ESP32
+  // restore wifi connect data
+  String ssid = "", password = "";
+  
+  if (preferences.begin(PrefName, true)) {
+    ssid = preferences.getString(PrefSsid, "");
+    password = base64Decode(preferences.getString(PrefPwd, ""));
+    preferences.end();
+  }  
+
+  if (WiFi.SSID() == "" && ssid != "")
+    WiFi.begin(ssid.c_str(), password.c_str());
+#endif
 
   setupWifi();
 
   // init http server
   setupHttp();
+
+#ifdef ESP32
+  WiFiUdp.beginMulticast(ipMulti, portMulti);
+#endif
 }
 
-void loopEspWifi() {
+void EspWiFi::loop() {
+  espWiFi.loopInternal();
+}
+
+void EspWiFi::loopInternal() {
   // apply net config changes
   if (netConfigChanged) {
     // spend some time for http clients
@@ -97,7 +70,7 @@ void loopEspWifi() {
     
     String hostname = espConfig.getValue("hostname");
     if (hostname != "")
-      WiFi.hostname(hostname);
+      setHostname(hostname);
     setupWifi();
     
     yield();
@@ -115,7 +88,7 @@ void loopEspWifi() {
   }
 }
 
-void setupWifi() {
+void EspWiFi::setupWifi() {
   DBG_PRINT("starting WiFi ");
 
   if (WiFi.getMode() != WIFI_STA)
@@ -139,11 +112,7 @@ void setupWifi() {
   statusWifi(true);
 }
 
-void statusWifi() {
-  statusWifi(false);
-}
-
-void statusWifi(bool reconnect) {
+void EspWiFi::statusWifi(bool reconnect) {
   bool connected = (WiFi.status() == WL_CONNECTED);
 
   if (connected == lastWiFiStatus)
@@ -174,10 +143,10 @@ void statusWifi(bool reconnect) {
   setupSoftAP();
 }
 
-void setupSoftAP() {
+void EspWiFi::setupSoftAP() {
   bool run = (WiFi.status() != WL_CONNECTED);
-  bool softAP = (ipString(WiFi.softAPIP()) != "0.0.0.0");
-  
+  bool softAP = (WiFi.getMode() & WIFI_AP); //(ipString(WiFi.softAPIP()) != "0.0.0.0");
+
   if (run && !softAP) {
     DBG_PRINT("starting SoftAP: ");
   
@@ -197,7 +166,7 @@ void setupSoftAP() {
   }
 }
 
-void configWifi() {
+void EspWiFi::configWifi() {
   String ssid = server.arg("ssid");
   
   if (WiFi.SSID() != ssid && ssid == "") {
@@ -207,12 +176,20 @@ void configWifi() {
   }
   if (WiFi.SSID() != ssid && ssid != "") {
     reconfigWifi(ssid, server.arg("password"));
+#ifdef ESP32
+    // store wifi connect data
+    if (preferences.begin(PrefName, false)) {
+      preferences.putString(PrefSsid, ssid);
+      preferences.putString(PrefPwd, base64::encode(server.arg("password")));
+      preferences.end();
+    }
+#endif
   }
 
   httpRequestProcessed = true;
 }
 
-void reconfigWifi(String ssid, String password) {
+void EspWiFi::reconfigWifi(String ssid, String password) {
   if (ssid != "" && (WiFi.SSID() != ssid || WiFi.psk() != password)) {
     DBG_PRINT(" apply new config (" + ssid + " & " + password.length() + " bytes psk)");
 
@@ -225,13 +202,13 @@ void reconfigWifi(String ssid, String password) {
   }
 }
 
-void configNet() {
+void EspWiFi::configNet() {
   String hostname = server.arg("hostname"), defaultHostname = getDefaultHostname();
   if (hostname == "" || hostname == defaultHostname) {
   // reset to default
     espConfig.unsetValue("hostname");
-    if (defaultHostname != WiFi.hostname())
-      WiFi.hostname(defaultHostname);
+    if (defaultHostname != getHostname())
+      setHostname(defaultHostname);
   } else
     espConfig.setValue("hostname", hostname.c_str());
   
@@ -275,45 +252,173 @@ void configNet() {
   DBG_PRINT("\n");
 }
 
-void setupHttp() {
+#ifdef ESP32
+String EspWiFi::base64Decode(String encoded) {
+  String result = "";
+
+  if (encoded.length() > 0 && encoded.length() % 4 == 0) {
+    size_t decodedLen = (float)encoded.length() * 0.75f; // * 6/8
+    char decoded[decodedLen+1];
+
+    uint32_t data = 0;
+    for (int idx=0; idx<encoded.length(); idx++) {
+      byte dataIdx = encoded.c_str()[idx];      
+      // A-Z
+      if (dataIdx >= 0x41 && dataIdx <= 0x5a)
+        dataIdx -= 0x41;
+      // a-z
+      else if (dataIdx >= 0x61 && dataIdx <= 0x7a)
+        dataIdx -= 0x61 - 0x1A;
+      // 0-9
+      else if (dataIdx >= 0x30 && dataIdx <= 0x39)
+        dataIdx += 0x34 - 0x30;
+      // +
+      else if (dataIdx == 0x0b)
+        dataIdx = 0x3E;
+      // /
+      else if (dataIdx == 0x47)
+        dataIdx = 0x3F;
+      else if (dataIdx == 0x3d)
+        dataIdx = 0xFF;
+      else
+        return "";
+
+      data <<= 6;
+      if (dataIdx != 0xFF)
+        data += dataIdx;
+
+      if (idx % 4 == 3) {
+        size_t didx = (idx - 3) * 0.75f;
+        decoded[didx]   = (data & 0x00FF0000) >> 16;
+        decoded[didx+1] = (data & 0x0000FF00) >> 8;
+        decoded[didx+2] = (data & 0x000000FF);
+        decoded[didx+3] = 0x00;
+        data = 0;
+      }
+    }
+    result = String(decoded);
+  }
+  
+  return result;
+}
+#endif
+
+void EspWiFi::setupHttp(bool start) {
 //  if (MDNS.begin(WiFi.hostname().c_str()))
 //    DBG_PRINTLN("MDNS responder started");
 
+  if (!start) {
+    if (httpStarted) {
+      DBG_PRINT("stopping WebServer");
+      server.stop();
+      DBG_PRINTLN();
+      httpStarted = false;
+    }
+
+    return;
+  }
+
+  if (httpStarted)
+    return;
+  
   DBG_PRINT("starting WebServer");
+  server.addHandler(&mEspWiFiRequestHandler);
+  server.onNotFound(std::bind(&EspWiFi::httpHandleNotFound, this));
 
-  server.on("/", HTTP_GET, httpHandleRoot);
-
-  server.on("/config", HTTP_GET, httpHandleConfig);
-  server.on("/config", HTTP_POST, httpHandleConfig);
 #ifdef _ESP1WIRE_SUPPORT
-  server.on("/devices", HTTP_GET, httpHandleDevices);
-  server.on("/schedules", HTTP_GET, httpHandleSchedules);
+  server.on("/devices", HTTP_GET, std::bind(&EspWiFi::httpHandleDevices, this));
+  server.on("/schedules", HTTP_GET, std::bind(&EspWiFi::httpHandleSchedules, this));
 #endif  // _ESP1WIRE_SUPPORT
-  server.on("/static/deviceList.css", HTTP_GET, httpHandleDeviceListCss);
-  server.on("/static/deviceList.js", HTTP_GET, httpHandleDeviceListJss);
-  server.onNotFound(httpHandleNotFound);
-  server.addHandler(new FunctionRequestHandler(httpHandleOTA, httpHandleOTAData, ("/ota/" + getChipID() + ".bin").c_str(), HTTP_POST));
-#ifdef _OTA_ATMEGA328_SERIAL
-  server.addHandler(new FunctionRequestHandler(httpHandleOTAatmega328, httpHandleOTAatmega328Data, String("/ota/atmega328.bin").c_str(), HTTP_POST));
-#endif
 
-  server.begin();
+  server.begin(80);
+  httpStarted = true;
+
   DBG_PRINTLN();
 }
 
-void httpHandleRoot() {
+bool EspWiFi::EspWiFiRequestHandlerImpl::canHandle(HTTPMethod method, String uri) {
+  if (method == HTTP_GET && uri == "/")
+    return true;
+  if ((method == HTTP_GET || method == HTTP_POST) && uri == espWiFi.getConfigUri())
+    return true;
+  if (method == HTTP_GET && uri == espWiFi.getDevListCssUri())
+    return true;
+  if (method == HTTP_GET && uri == espWiFi.getDevListJsUri())
+    return true;
+  if (method == HTTP_POST && uri == espWiFi.getOtaUri())
+    return true;
+
+  return false;
+}
+
+bool EspWiFi::EspWiFiRequestHandlerImpl::canUpload(String uri) {
+  if (uri == espWiFi.getOtaUri())
+    return true;
+
+  return false;
+}
+
+#ifdef ESP8266
+bool EspWiFi::EspWiFiRequestHandlerImpl::handle(ESP8266WebServer& server, HTTPMethod method, String uri) {
+#endif
+#ifdef ESP32
+bool EspWiFi::EspWiFiRequestHandlerImpl::handle(WebServer& server, HTTPMethod method, String uri) {
+  void upload(WebServer& server, String uri, HTTPUpload& upload);
+#endif
+  if (method == HTTP_GET && uri == "/") {
+    espWiFi.httpHandleRoot();
+    return true;
+  }
+  if ((method == HTTP_GET || method == HTTP_POST) && uri == espWiFi.getConfigUri()) {
+    espWiFi.httpHandleConfig();
+    return true;
+  }
+  if (method == HTTP_GET && uri == espWiFi.getDevListCssUri()) {
+    espWiFi.httpHandleDeviceListCss();
+    return true;
+  }
+  if (method == HTTP_GET && uri == espWiFi.getDevListJsUri()) {
+    espWiFi.httpHandleDeviceListJss();
+    return true;
+  }
+  if (method == HTTP_POST && uri == espWiFi.getOtaUri()) {
+    espWiFi.httpHandleOTA();
+    return true;
+  }
+
+  return false;
+}
+
+#ifdef ESP8266
+void EspWiFi::EspWiFiRequestHandlerImpl::upload(ESP8266WebServer& server, String uri, HTTPUpload& upload) {
+#endif
+#ifdef ESP32
+void EspWiFi::EspWiFiRequestHandlerImpl::upload(WebServer& server, String uri, HTTPUpload& upload) {
+#endif
+  if (server.method() == HTTP_POST && uri == espWiFi.getOtaUri())
+    espWiFi.httpHandleOTAData();
+}
+
+void EspWiFi::httpHandleRoot() {
   DBG_PRINT("httpHandleRoot: ");
   // menu
   String message = F("<div class=\"menu\">");
-#ifdef _ESPSERIALBRIDGE_SUPPORT
-  message += F("<a id=\"serial\" class=\"dc\">Serial</a>");
-#endif  // _ESPSERIALBRIDGE_SUPPORT
-#ifdef _ESP1WIRE_SUPPORT
-  message += F("<a href=\"/devices\" class=\"dc\">Devices</a><a href=\"/schedules\" class=\"dc\">Schedules</a>");
-#endif  // _ESP1WIRE_SUPPORT
-#ifdef _MQTT_SUPPORT
-  message += "<a id=\"mqtt\" class=\"dc\">MQTT</a>";
-#endif
+//#ifdef _ESPSERIALBRIDGE_SUPPORT
+//  message += F("<a id=\"serial\" class=\"dc\">Serial</a>");
+//#endif  // _ESPSERIALBRIDGE_SUPPORT
+//#ifdef _ESP1WIRE_SUPPORT
+//  message += F("<a href=\"/devices\" class=\"dc\">Devices</a><a href=\"/schedules\" class=\"dc\">Schedules</a>");
+//#endif  // _ESP1WIRE_SUPPORT
+    // for all external EspWiFiRequestHandler check menu
+    EspWiFiRequestHandler *reqH = &mEspWiFiRequestHandler;
+    String extMenu;
+
+    while (reqH != NULL) {
+      if (reqH->isExternalRequestHandler() && (extMenu = reqH->menuHtml()) != "")
+        message += extMenu;
+      reqH = reqH->getNextRequestHandler();
+    }
+
   message += "<a id=\"ota\" class=\"dc\">OTA</a>";
   message += "<sp>" + uptime() + "</sp></div>";
 
@@ -322,7 +427,7 @@ void httpHandleRoot() {
   String html = "<table><tr><td>ssid:</td><td>" + WiFi.SSID() + "</td><td><a id=\"wifi\" class=\"dc\">...</a></td></tr>";
   if (WiFi.status() == WL_CONNECTED) {
     html += F("<tr><td>Status:</td><td>connected</td><td></td></tr>");
-    html += F("<tr><td>Hostname:</td><td>"); html += WiFi.hostname(); html += F(" (MAC: "); html += WiFi.macAddress();html += F(")</td><td rowspan=\"2\">");
+    html += F("<tr><td>Hostname:</td><td>"); html += getHostname(); html += F(" (MAC: "); html += WiFi.macAddress();html += F(")</td><td rowspan=\"2\">");
     html += netConfig; html += F("</td></tr>");
     html += F("<tr><td>IP:</td><td>"); html += ipString(WiFi.localIP()); html += F("/"); html +=ipString(WiFi.subnetMask()); html += F(" "); html += ipString(WiFi.gatewayIP()); html += F("</td></tr>");
   } else {
@@ -338,7 +443,7 @@ void httpHandleRoot() {
   httpRequestProcessed = true;
 }
 
-void httpHandleConfig() {
+void EspWiFi::httpHandleConfig() {
   DBG_PRINT("httpHandleConfig: ");
   String message = "", separator = "";
 
@@ -374,24 +479,6 @@ void httpHandleConfig() {
 #ifdef _DEBUG_HTTP
     for (int i=0; i<server.args();i++) {
       DBG_PRINTLN("#" + String(i) + " '" + server.argName(i) + "' = '" + server.arg(i) + "'");
-    }
-#endif
-
-#ifdef _ESPSERIALBRIDGE_SUPPORT
-    if (server.hasArg("serial") && (server.arg("serial") == "" || server.arg("serial") == "config")) {
-      String result = "";
-      uint16_t resultCode;
-      if (deviceConfigCallback != NULL && (result = deviceConfigCallback(&server, &resultCode))) {
-        server.client().setNoDelay(true);
-        server.send(resultCode, "text/html", result);
-        httpRequestProcessed = true;
-        return;
-      }
-
-      server.client().setNoDelay(true);
-      server.send(403, "text/plain", "Forbidden");
-      httpRequestProcessed = true;
-      return;
     }
 #endif
 
@@ -448,8 +535,8 @@ void httpHandleConfig() {
       return;
     }
 #endif
-    
-    if (server.hasArg("ota") && server.arg("ota")== "") {
+
+    if (server.hasArg("ota") && server.arg("ota") == "") {
       String result = F("<h4>OTA</h4>");
       result += flashForm();
       server.client().setNoDelay(true);
@@ -458,18 +545,7 @@ void httpHandleConfig() {
       return;
     }
 
-#ifdef _OTA_ATMEGA328_SERIAL
-    if (server.hasArg("ota-addon") && server.arg("ota-addon")== "") {
-      String result = F("<h4>OTA Addon</h4>");
-      result += flashAddonForm();
-      server.client().setNoDelay(true);
-      server.send(200, "text/html", result);
-      httpRequestProcessed = true;
-      return;
-    }
-#endif
-
-    if (server.hasArg("wifi") && server.arg("wifi")== "") {
+    if (server.hasArg("wifi") && server.arg("wifi") == "") {
       String result = F("<h4>WiFi</h4>");
       result += wifiForm();
       server.client().setNoDelay(true);
@@ -503,29 +579,41 @@ void httpHandleConfig() {
       return;
     }
 
-#ifdef _MQTT_SUPPORT
-    if (server.hasArg("mqtt") && server.arg("mqtt") == "") {
-      String result = F("<h4>MQTT</h4>");
-      result += mqttForm();
+    // for all external EspWiFiRequestHandler check config
+    EspWiFiRequestHandler *reqH = &mEspWiFiRequestHandler;
+    while (reqH != NULL) {
+      if (reqH->isExternalRequestHandler() && reqH->canHandle(server) && (httpRequestProcessed = reqH->handle(server, server.method(), server.uri())))
+        return;
+      reqH = reqH->getNextRequestHandler();
+    }
+
+    if (server.hasArg("options") && server.arg("options") == "") {
+      String result = F("<h4>Options</h4>");
+      result += optionForm();
       server.client().setNoDelay(true);
       server.send(200, "text/html", result);
       httpRequestProcessed = true;
       return;
     }
     
-    if (server.arg("mqtt") == "submit") {
-      if (espMqtt.testConfig(server.arg("server"), server.arg("port"), server.arg("user"), server.arg("password"))) {
-        server.client().setNoDelay(true);
-        server.send(200, "text/plain", "ok");
-      } else {
-        server.client().setNoDelay(true);
-        server.send(304, "text/plain", "MQTT connection test failed!");
+    if (server.hasArg("options") && server.arg("options") == "submit") {
+      for (uint8_t i=1; i<server.args(); i++) {
+        if (server.argName(i) != "options")
+          espConfig.setValue(server.argName(i), server.arg(i));
       }
+
+      if (espConfig.hasChanged()) {
+        DBG_PRINT("saving ");
+        espConfig.saveToFile();
+        optionsChanged = true;
+      }
+      
+      server.client().setNoDelay(true);
+      server.send(200, "text/html", "");
       httpRequestProcessed = true;
       return;
     }
-#endif
-
+    
     for (uint8_t i=1; i<server.args(); i++) {
       int value, value2;
       bool hasValue = false, hasValue2 = false;
@@ -552,7 +640,7 @@ void httpHandleConfig() {
 }
 
 #ifdef _ESP1WIRE_SUPPORT
-void httpHandleDevices() {
+void EspWiFi::httpHandleDevices() {
   DBG_PRINT("httpHandleDevices: ");
   String message = "", devList = "";
 
@@ -590,7 +678,7 @@ void httpHandleDevices() {
   httpRequestProcessed = true;
 }
 
-void httpHandleSchedules() {
+void EspWiFi::httpHandleSchedules() {
   DBG_PRINT("httpHandleSchedules: ");
   String message = "", schedList = "";
 
@@ -621,30 +709,45 @@ void httpHandleSchedules() {
 }
 #endif  // _ESP1WIRE_SUPPORT
 
-void httpHandleDeviceListCss() {
+void EspWiFi::httpHandleDeviceListCss() {
   DBG_PRINT("httpHandleDeviceListCss: ");
   server.sendHeader("Cache-Control", "public, max-age=86400");
   server.client().setNoDelay(true);
   String css = F(".menu{height:1.3em;padding:5px 5px 5px 5px;margin-bottom:5px;background-color:#E0E0E0;}.menu .dc{float:left;}.menu sp{float: right;}label{width:4em;text-align:left;display:inline-block;} input[type=text]{margin-bottom:2px;} table td{padding:5px 15px 0px 0px;} table th{text-align:left;} fieldset{margin:0px 10px 10px 10px;max-height:20em;overflow:auto;} legend select{margin-right:5px;}");
-  css += F(".dc{border:1px solid #A0A0A0;border-radius:5px;padding:0px 3px 0px 3px;}a.dc{color:black;text-decoration:none;margin-right:3px;outline-style:none;}.dc:hover{border:1px solid #5F5F5F;background-color:#D0D0D0;cursor:pointer;} #mD{background:rgba(0,0,0,0.5);visibility:hidden;position:absolute;top:0;left:0;width:100%;height:100%;z-index:1;padding-top:10%;} #mDC{border:1px solid #A0A0A0;border-radius:5px;background:rgba(255,255,255,1);margin:auto;display:inline-block;} #mDCC label{margin-left:10px;width:8em;text-align:left;display:inline-block;} #mDCC select,input{margin:5px 10px 0px 10px;width:13em;display:inline-block;} #mDCC table td input{margin:0px 0px 0px 0px;width:0.8em;} #mDCC table th {font-size:smaller} #mDCB{float:right;margin:10px 10px 10px 10px;} #mDCB a{margin:0px 2px 0px 2px;}");
+  css += F(".dc{border:1px solid #A0A0A0;border-radius:5px;padding:0px 3px 0px 3px;}a.dc{color:black;text-decoration:none;margin-right:3px;outline-style:none;}.dc:hover{border:1px solid #5F5F5F;background-color:#D0D0D0;cursor:pointer;} #mD{background:rgba(0,0,0,0.5);visibility:hidden;position:absolute;top:0;left:0;width:100%;height:100%;z-index:1;} #mDC{border:1px solid #A0A0A0;border-radius:5px;background:rgba(255,255,255,1);margin-top:10%;display:inline-block;} #mDCC {margin-top: 0px;} #mDCC label{margin-left:10px;width:8em;text-align:left;display:inline-block;} #mDCC select,input{margin:5px 10px 0px 10px;width:13em;display:inline-block;} #mDCC table td input{margin:0px 0px 0px 0px;width:0.8em;} #mDCC table th {font-size:smaller} #mDCB{float:right;margin:10px 10px 10px 10px;} #mDCB a{margin:0px 2px 0px 2px;}");
   server.send(200, "text/css", css);
   httpRequestProcessed = true;
 }
 
-void httpHandleDeviceListJss() {
+void EspWiFi::httpHandleDeviceListJss() {
   DBG_PRINT("httpHandleDeviceListJss: ");
   server.sendHeader("Cache-Control", "public, max-age=86400");
   server.client().setNoDelay(true);
-  String script = F("function windowClick(e){if(e.target.className==\"dc\"&&e.target.id){modDlg(true,false,e.target.id);}}function modDlg(open,save,id){if(id=='back'){history.back();return;}document.onkeypress=(open?function(evt){evt=evt||window.event;var charCode=evt.keyCode||evt.which;if(charCode==27)modDlg(false,false);if(charCode==13)modDlg(false,true);}:null);var md=document.getElementById('mD');if(save){var form=document.getElementById('submitForm');if(form){form.submit();return;}form=document.getElementById('configForm');if(form){var aStr=form.action;var idx=aStr.indexOf('?');var url=aStr.substr(0, idx + 1);var params='';var elem;var parse;aStr=aStr.substr(idx + 1);while(1){idx=aStr.indexOf('&');if(idx>0)parse=aStr.substr(0, idx);else parse=aStr;");
+  String script = F("var mDE=true;function gE(n){return document.getElementById(n);}function cE(n){return document.createElement(n);}function cTN(d){return document.createTextNode(d);}function aC(p,c){p.appendChild(c);}function sA(o,a,v){o.setAttribute(a,v);}function aSU(u,p,n){var sN=cE('script');sA(sN,'type','text/javascript');sA(sN,'src',u);aC(p,sN);if(typeof n!=='undefined')sA(sN,'data-name',n);}function aST(t,p){var sN=cE('script');sA(sN,'type','text/javascript');aC(sN,cTN(t.replace('<script>', '').replace('</script>','')));aC(p,sN);}function hR(n,r,i){var o=gE(n);if(r.substring(0,8)=='<script>')aST(r,o);else o.innerHTML=r;}");
+  script += F("function modDlgEn(e){mDE=(e==true?true:false);}");
+  script += F("function windowClick(e){if(e.target.className==\"dc\"&&e.target.id){modDlg(true,false,e.target.id);}}function modDlg(open,save,id,action){if(mDE==false)return;action=((action===undefined)?'form':action);if(id=='back'){history.back();return;}document.onkeydown=(open?function(evt){evt=evt||window.event;var charCode=evt.keyCode||evt.which;if(charCode==27)modDlg(false,false);if(charCode==13)modDlg(false,true);}:null);var md=gE('mD');if(save){var form=gE('submitForm');if(form){form.submit();return;}form=gE('configForm');if(form){var aStr=form.action;var idx=aStr.indexOf('?');var url=aStr.substr(0, idx + 1);var params='';var elem;var parse;aStr=aStr.substr(idx + 1);while(1){idx=aStr.indexOf('&');if(idx>0)parse=aStr.substr(0, idx);else parse=aStr;");
   script += F("if(parse.substr(parse.length-1)!='='){params+=parse+'&';}else{elem=document.getElementsByName(parse.substr(0,parse.length-1));if(elem && elem[0])params+=parse+(elem[0].type!=\"checkbox\"?elem[0].value:(elem[0].checked?1:0))+'&';}if(idx>0) aStr=aStr.substr(idx+1); else break;}try{var xmlHttp=new XMLHttpRequest();xmlHttp.open('POST',url+params,false);xmlHttp.send(null);if(xmlHttp.status!=200){alert('Fehler: '+xmlHttp.statusText);return;}}catch(err){alert('Fehler: '+err.message);return;}}}if(open){try{var url='/config?ChipID=");
   script += getChipID();
-  script += F("&action=form';if(id.indexOf('schedule#')==0)url+='&schedule='+id.substr(9);else if(id=='mqtt'||id=='wifi'||id.indexOf('ota')==0||id=='resetSearch'||id=='serial'||id=='net')url+='&'+id+'=';else url+='&deviceID='+id;var xmlHttp=new XMLHttpRequest(); xmlHttp.open('POST',url,false);xmlHttp.send(null);if(xmlHttp.status != 200){alert('Fehler: '+xmlHttp.statusText);return;}if(id=='resetSearch'){window.location.reload();return;}document.getElementById('mDCC').innerHTML=xmlHttp.responseText;}catch(err){alert('Fehler: '+err.message);return;}}md.style.visibility=(open?'visible':'hidden');if(!open){document.getElementById('mDCC').innerHTML='';}}");
-  script += F("function filter(){var filter=document.getElementsByName('filter')[0];var table=document.getElementById('devices');if(filter&&table){var trs=document.getElementsByTagName('tr');i=1;while(trs[i]){trs[i].style.display=((filter.value&trs[i].firstChild.nodeValue)==filter.value||filter.value==255?'table-row':'none');i++;}}}");
+  script += F("&action='+action;if(id.indexOf('schedule#')==0)url+='&schedule='+id.substr(9);else if(id=='wifi'||id=='net'||id=='ota'"); // ||id=='resetSearch'||id=='options'
+
+  // for all external EspWiFiRequestHandler check menu
+  EspWiFiRequestHandler *reqH = &mEspWiFiRequestHandler;
+  uint8_t extMenuIDs;
+
+  while (reqH != NULL) {
+    if (reqH->isExternalRequestHandler() && (extMenuIDs = reqH->menuIdentifiers()) > 0)
+      for (int i=0; i<extMenuIDs; i++)
+        script += "||id=='" + reqH->menuIdentifiers(i) + "'";
+    reqH = reqH->getNextRequestHandler();
+  }
+
+  script += F(")url+='&'+id+'=';else url+='&deviceID='+id;var xmlHttp=new XMLHttpRequest(); xmlHttp.open('POST',url,false);xmlHttp.send(null);if(xmlHttp.status != 200 && xmlHttp.status != 204 && xmlHttp.status != 205){alert('Fehler: '+xmlHttp.statusText);return;}if(xmlHttp.status==204){return;}if(id=='resetSearch'||xmlHttp.status==205){window.location.reload();return;}hR('mDCC',xmlHttp.responseText,id);}catch(err){alert('Fehler: '+err.message);return;}}md.style.visibility=(open?'visible':'hidden');if(!open){gE('mDCC').innerHTML='';}}");
+  script += F("function filter(){var filter=document.getElementsByName('filter')[0];var table=gE('devices');if(filter&&table){var trs=document.getElementsByTagName('tr');i=1;while(trs[i]){trs[i].style.display=((filter.value&trs[i].firstChild.nodeValue)==filter.value||filter.value==255?'table-row':'none');i++;}}}");
   server.send(200, "text/javascript", script);
   httpRequestProcessed = true;
 }
 
-void httpHandleNotFound() {
+void EspWiFi::httpHandleNotFound() {
   DBG_PRINT("httpHandleNotFound: ");
   String message = "File Not Found\n\n";
   message += "URI: ";
@@ -663,15 +766,32 @@ void httpHandleNotFound() {
   httpRequestProcessed = true;
 }
 
-boolean sendMultiCast(String msg) {
+void EspWiFi::registerExternalRequestHandler(EspWiFiRequestHandler *externalRequestHandler) {
+  EspWiFiRequestHandler *reqH = &mEspWiFiRequestHandler;
+
+  while (reqH->getNextRequestHandler() != NULL)
+    reqH = reqH->getNextRequestHandler();
+  reqH->setNextRequestHandler(externalRequestHandler);
+    
+  DBG_PRINT("register ");
+  server.addHandler(externalRequestHandler);
+}
+
+boolean EspWiFi::sendMultiCast(String msg) {
   boolean result = false;
 
   if (WiFi.status() != WL_CONNECTED)
     return result;
 
 #ifndef _ESP_WIFI_UDP_MULTICAST_DISABLED
+#ifdef ESP8266
   if (WiFiUdp.beginPacketMulticast(ipMulti, portMulti, WiFi.localIP()) == 1) {
     WiFiUdp.write(msg.c_str());
+#endif
+#ifdef ESP32
+  if (WiFiUdp.beginMulticastPacket() == 1) {
+    WiFiUdp.write((uint8_t*)msg.c_str(), msg.length());
+#endif
     WiFiUdp.endPacket();
     yield();  // force ESP8266 background tasks (wifi); multicast requires approx. 600 µs vs. delay 1ms
     result = true;
@@ -681,26 +801,39 @@ boolean sendMultiCast(String msg) {
   return result;
 }
 
-String ipString(IPAddress ip) {
+String EspWiFi::ipString(IPAddress ip) {
   return String(ip[0]) + "." + String(ip[1]) + "." + String(ip[2]) + "." + String(ip[3]);
 }
 
-String getChipID() {
+String EspWiFi::getChipID() {
   char buf[10];
+#ifdef ESP8266
   sprintf(buf, "%08d", (unsigned int)ESP.getChipId());
+#endif
+#ifdef ESP32
+  String mac = WiFi.macAddress();
+  sprintf(buf, "%08d", strtol(String(mac.substring(9, 11) + mac.substring(12, 14) + mac.substring(15, 17)).c_str(), NULL, 16));
+#endif
+  
   return String(buf);
 }
 
-String getDefaultHostname() {
-  uint8_t mac[6];
-  char buf[11];
-  WiFi.macAddress(mac);
-  sprintf(buf, "ESP_%02X%02X%02X", mac[3], mac[4], mac[5]);
-
-  return String(buf);
+String EspWiFi::getHostname() {
+#ifdef ESP8266
+  return WiFi.hostname();
+#endif  
+#ifdef ESP32
+  return WiFi.getHostname();
+#endif  
 }
 
-void printUpdateError() {
+String EspWiFi::getDefaultHostname() {
+  String mac = WiFi.macAddress();
+
+  return "ESP_" + mac.substring(9, 11) + mac.substring(12, 14) + mac.substring(15, 17);
+}
+
+void EspWiFi::printUpdateError() {
 #if DBG_PRINTER != ' '
       Update.printError(DBG_PRINTER);
       DBG_FORCE_OUTPUT();
@@ -709,7 +842,7 @@ void printUpdateError() {
 
 #ifdef _OTA_NO_SPIFFS
 
-void httpHandleOTA() {
+void EspWiFi::httpHandleOTA() {
   String message = "\n\nhttpHandleOTA: ";
   bool doReset = false;
 
@@ -737,12 +870,17 @@ void httpHandleOTA() {
 
   if (doReset) {
     delay(1000);
+#ifdef ESP8266
     ESP.reset();
+#endif
+#ifdef ESP32
+    ESP.restart();
+#endif
   }
   httpRequestProcessed = true;
 }
 
-void httpHandleOTAData() {
+void EspWiFi::httpHandleOTAData() {
   static HeaderBootMode1 otaHeader;
  
   // Upload 
@@ -785,9 +923,9 @@ void httpHandleOTAData() {
 
 #endif  // _OTA_NO_SPIFFS
 
-#if !defined(_OTA_NO_SPIFFS) || defined(_OTA_ATMEGA328_SERIAL)
+#ifndef _OTA_NO_SPIFFS
 
-bool initOtaFile(String filename, String mode) {
+bool EspWiFi::initOtaFile(String filename, String mode) {
   SPIFFS.begin();
   otaFile = SPIFFS.open(filename, mode.c_str());
 
@@ -797,7 +935,7 @@ bool initOtaFile(String filename, String mode) {
   return otaFile;
 }
 
-void clearOtaFile() {
+void EspWiFi::clearOtaFile() {
   if (otaFile)
     otaFile.close();
   if (SPIFFS.exists(otaFileName))
@@ -805,11 +943,7 @@ void clearOtaFile() {
   otaFileName = "";
 }
 
-#endif  // defined(_OTA_NO_SPIFFS) || defined(_OTA_ATMEGA328_SERIAL)
-
-#ifndef _OTA_NO_SPIFFS
-
-void httpHandleOTA() {
+void EspWiFi::httpHandleOTA() {
   String message = "\n\nhttpHandleOTA: ";
   bool doUpdate = false;
   
@@ -824,24 +958,24 @@ void httpHandleOTA() {
       clearOtaFile();
   }
 
-  Serial.println(message);
+  DBG_PRINTLN(message);
 
   server.client().setNoDelay(true);
   server.sendHeader("Location", "/");
   server.send(303, "text/plain", "See Other");
 
   if (doUpdate) {
-    Serial.print("starting Update: ");
+    DBG_PRINT("starting Update: ");
     size_t written = Update.write(otaFile);
     clearOtaFile();
 
     if (!Update.end() || Update.hasError()) {
-      Serial.println("failed!");
+      DBG_PRINTLN("failed!");
       Update.printError(Serial);
       Update.end(true);
     } else {
-      Serial.println("ok, md5 is " + Update.md5String());
-      Serial.println("restarting");
+      DBG_PRINTLN("ok, md5 is " + Update.md5String());
+      DBG_PRINTLN("restarting");
       delay(1000);
       ESP.reset();
     }
@@ -849,148 +983,47 @@ void httpHandleOTA() {
   httpRequestProcessed = true;
 }
 
-void httpHandleOTAData() {
+void EspWiFi::httpHandleOTAData() {
   static HeaderBootMode1 otaHeader;
  
   HTTPUpload& upload = server.upload();
 
   if (upload.status == UPLOAD_FILE_START) {
-    Serial.print("httpHandleOTAData: " + upload.filename);
+    DBG_PRINT("httpHandleOTAData: " + upload.filename);
   } else if (upload.status == UPLOAD_FILE_WRITE) {
     // first block with data
     if (upload.totalSize == 0) {
       memcpy(&otaHeader, &upload.buf[0], sizeof(HeaderBootMode1));
-      Serial.printf(", magic: 0x%0x, size: 0x%0x, speed: 0x%0x\n", otaHeader.magic, ((otaHeader.flash_size_speed & 0xf0) >> 4), (otaHeader.flash_size_speed & 0x0f));
+      DBG_PRINTF(", magic: 0x%0x, size: 0x%0x, speed: 0x%0x\n", otaHeader.magic, ((otaHeader.flash_size_speed & 0xf0) >> 4), (otaHeader.flash_size_speed & 0x0f));
 
       if (otaHeader.magic == 0xe9)
         initOtaFile("/ota/" + getChipID() + ".bin", "w");
     }
-    Serial.print(".");
+    DBG_PRINT(".");
     if ((upload.totalSize % HTTP_UPLOAD_BUFLEN) == 20)
-      Serial.println("\n");
+      DBG_PRINTLN("\n");
 
     if (otaFile && otaFile.write(upload.buf, upload.currentSize) != upload.currentSize) {
-      Serial.println("\nwriting file " + otaFileName + " failed!");
+      DBG_PRINTLN("\nwriting file " + otaFileName + " failed!");
       clearOtaFile();
     }
   } else if (upload.status == UPLOAD_FILE_END) {
     if (otaFile) {
       bool uploadComplete = (otaFile.size() == upload.totalSize);
       
-      Serial.printf("\nend: %s (%d Bytes)\n", otaFile.name(), otaFile.size());
+      DBG_PRINTLN("\nend: %s (%d Bytes)\n", otaFile.name(), otaFile.size());
       otaFile.close();
       
       if (!uploadComplete)     
         clearOtaFile();
     }
   } else if (upload.status == UPLOAD_FILE_ABORTED) {
-    Serial.printf("\naborted\n");
+    DBG_PRINTF("\naborted\n");
     clearOtaFile();
   }
 }
 
 #endif // _OTA_NO_SPIFFS
 
-#ifdef _OTA_ATMEGA328_SERIAL
-
-void clearParser() {
-  if (intelHexFormatParser != NULL) {
-    free(intelHexFormatParser);
-    intelHexFormatParser = NULL;
-  }
-}
-
-void httpHandleOTAatmega328() {
-  String message = "\n\nhttpHandleOTAatmega328: ";
-  bool doUpdate = false;
-  
-  if (SPIFFS.exists(otaFileName) && initOtaFile(otaFileName, "r")) {
-    message += otaFile.name();
-    message += + " (";
-    message += otaFile.size();
-    message += " Bytes) received!";
-    doUpdate = true;
-  } else
-    message += "file doesn't exists (maybe wrong IntelHEX format parsed!)";
-
-  DBG_PRINTLN(message);
-
-  if (doUpdate) {
-    DBG_PRINT("starting Update: ");
-    DBG_FORCE_OUTPUT();
-
-    uint8_t txPin = 1;
-#ifdef _ESPSERIALBRIDGE_SUPPORT
-    espSerialBridge.enableClientConnect(false);
-    txPin = espSerialBridge.getTxPin();
-#endif
-
-    FlashATmega328 flashATmega328(2, txPin);
-
-    flashATmega328.flashFile(&otaFile);
-
-#ifdef _ESPSERIALBRIDGE_SUPPORT
-    espSerialBridge.enableClientConnect();
-#endif
-
-    clearOtaFile();
-  }
-
-  server.client().setNoDelay(true);
-  server.sendHeader("Location", "/");
-  server.send(303, "text/plain", "See Other");
-  httpRequestProcessed = true;
-}
-
-void httpHandleOTAatmega328Data() {
-  HTTPUpload& upload = server.upload();
-
-  if (upload.status == UPLOAD_FILE_START) {
-    DBG_PRINT("httpHandleOTAatmega328Data: " + upload.filename);
-    DBG_FORCE_OUTPUT();
-  } else if (upload.status == UPLOAD_FILE_WRITE) {
-    // first block with data
-    if (upload.totalSize == 0) {
-        initOtaFile("/ota/atmega328.bin", "w");
-        intelHexFormatParser = new IntelHexFormatParser(&otaFile);
-    }
-
-    if (intelHexFormatParser == NULL)
-      return;
-
-    DBG_PRINT(".");
-    if ((upload.totalSize % HTTP_UPLOAD_BUFLEN) == 20)
-      DBG_PRINTLN("\n");
-
-    if (!intelHexFormatParser->parse(upload.buf, upload.currentSize)) {
-      DBG_PRINTLN("\nwriting file " + otaFileName + " failed!");
-      DBG_FORCE_OUTPUT();
-
-      clearParser();
-      clearOtaFile();
-    }
-  } else if (upload.status == UPLOAD_FILE_END) {
-    if (otaFile) {
-      bool uploadComplete = (otaFile.size() == intelHexFormatParser->sizeBinaryData() && intelHexFormatParser->isEOF());
-      
-      DBG_PRINTF("\nend: %s (%d Bytes)\n", otaFile.name(), otaFile.size());
-      DBG_FORCE_OUTPUT();
-      otaFile.close();
-      
-      clearParser();
-      if (!uploadComplete)     
-        clearOtaFile();
-    }
-  } else if (upload.status == UPLOAD_FILE_ABORTED) {
-    DBG_PRINTF("\naborted\n");
-    DBG_FORCE_OUTPUT();
-
-    clearParser();
-    clearOtaFile();
-  }
-}
-
-#endif  // _OTA_ATMEGA328_SERIAL
-
-#endif  // ESP8266
+#endif  // ESP8266 || ESP32
 

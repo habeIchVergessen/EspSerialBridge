@@ -1,24 +1,25 @@
 #include "Arduino.h"
 
-#ifdef ESP8266
+#if defined(ESP8266) || defined(ESP32)
 
 #include "EspConfig.h"
 
 // class EspConfig
 EspConfig::EspConfig(String appName) {
   mAppName = appName;
-  SPIFFS.begin();
-  if (openRead()) {
-    while (configFile.available()) {
-      String data = configFile.readStringUntil('\n');
+}
 
-      int idx;
-      if (data.startsWith("'") && data.endsWith("'") && (idx = data.indexOf("' = '")) > 0) {
-        setValue(data.substring(1, idx), data.substring(idx + 5, data.length() - 1));
-      }
-    }
-    configChanged = false;
+void EspConfig::setup() {
+  mSpiffsMounted = SPIFFS.begin();
+
+  if (!mSpiffsMounted) {
+    DBG_PRINT("mount SPIFFS failed! try format ");
+    mSpiffsMounted = (SPIFFS.format() && SPIFFS.begin());
+    DBG_PRINTLN(String(mSpiffsMounted ? "ok" : "failed"));
+    return;
   }
+
+  loadData();
 }
 
 EspConfig::~EspConfig() {
@@ -37,6 +38,24 @@ bool EspConfig::openRead() {
 
 bool EspConfig::openWrite() {
   return (configFile = SPIFFS.open(fileName().c_str(), "w"));
+}
+
+bool EspConfig::loadData() {
+  bool result = false;
+  
+  if (openRead()) {
+    while (configFile.available()) {
+      String data = configFile.readStringUntil('\n');
+
+      int idx;
+      if (data.startsWith("'") && data.endsWith("'") && (idx = data.indexOf("' = '")) > 0) {
+        setValue(data.substring(1, idx), data.substring(idx + 5, data.length() - 1));
+      }
+    }
+    configChanged = !(result = true);
+  }
+
+  return result;
 }
 
 String EspConfig::getValue(String name) {
@@ -143,7 +162,7 @@ bool EspConfig::saveToFile() {
     configChanged = false;
     result = true;
   } else
-    Serial.println("saveToFile: " + fileName() + " failed!");
+    DBG_PRINT("saveToFile: " + fileName() + " failed! ");
 
   return result;
 }
@@ -154,7 +173,8 @@ EspDeviceConfig EspConfig::getDeviceConfig(String deviceName) {
 
 // class EspDeviceConfig
 EspDeviceConfig::EspDeviceConfig(String deviceName) : EspConfig(deviceName) {
+  loadData();
 }
 
-#endif  // ESP8266
+#endif  // ESP8266 || ESP32
 

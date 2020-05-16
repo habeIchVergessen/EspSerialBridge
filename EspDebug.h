@@ -3,10 +3,11 @@
 
 #include <Arduino.h>
 
-#ifdef ESP8266
+#if defined(ESP8266) || defined(ESP32)
   #include <FS.h>
 
   #define DBG_PRINTER espDebug
+  #define DBG_PRINTER_NET
 #else
   #define DBG_PRINTER Serial
 #endif
@@ -16,18 +17,23 @@
 #define DBG_PRINTLN(...) { DBG_PRINTER.println(__VA_ARGS__); }
 #define DBG_WRITE(...) { DBG_PRINTER.write(__VA_ARGS__); }
 
-#if DBG_PRINTER==espDebug
+#ifdef DBG_PRINTER_NET
   #define DBG_FORCE_OUTPUT() { DBG_PRINTER.sendWriteBuffer(); }
 #else
   #define DBG_FORCE_OUTPUT() { }
 #endif
 
-#ifdef ESP8266
+#if defined(ESP8266) || defined(ESP32)
   typedef void (*HandleInputCallback) (Stream *input);
 
   #include <WiFiServer.h>
   #include <WiFiClient.h>
-  #include <ESP8266WiFi.h>
+  #ifdef ESP8266
+    #include <ESP8266WiFi.h>
+  #endif
+  #ifdef ESP32
+    #include <WiFi.h>
+  #endif
 #endif
 
 class EspDebug : public Stream {
@@ -41,7 +47,7 @@ class EspDebug : public Stream {
     void bufferedWrite(boolean enable=true);
     void enableSerialOutput(bool enable=true) { m_serialOut = enable; };
 
-#ifdef ESP8266
+#if defined(ESP8266) || defined(ESP32)
     void registerInputCallback(HandleInputCallback inputCallback) { m_inputCallback = inputCallback; };
 #endif
 
@@ -63,22 +69,24 @@ class EspDebug : public Stream {
     bool dbgClientClosed();
     
   private:
-#ifdef ESP8266
+//#if defined(ESP8266) || defined(ESP32)
+#ifdef DBG_PRINTER_NET
     static const uint16_t m_bufferSize = 256;
 #else
     static const uint16_t m_bufferSize = 64;
 #endif
-    byte m_buffer[m_bufferSize];
-    uint16_t m_inPos = 0;
+    byte m_buffer[m_bufferSize+1];
+    uint16_t m_inPos = 0, m_SerialOut = 0;
     boolean m_bufferedWrite = true;
     boolean m_setupLog = true;
     boolean m_serialOut = false;
 
-#ifdef ESP8266
+#if defined(ESP8266) || defined(ESP32)
     HandleInputCallback m_inputCallback = NULL;
 
     WiFiServer m_DbgServer = NULL;
     WiFiClient m_DbgClient;
+    String m_SetupLogData = "";
 #endif
 };
 
