@@ -14,8 +14,8 @@
 #define _ESPSERIALBRIDGE_SUPPORT
 
 #ifdef _ESPSERIALBRIDGE_SUPPORT
-  #define _OTA_ATMEGA328_SERIAL // enable atmega328 OTA
-  #define _TARGET_ESP_01  // no gpio15 for serial use
+//  #define _OTA_ATMEGA328_SERIAL // enable atmega328 OTA
+//  #define _TARGET_ESP_01  // no gpio15 for serial use
 #endif
 
 #ifdef _OTA_ATMEGA328_SERIAL

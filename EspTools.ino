@@ -1,19 +1,19 @@
-#ifndef BUILTIN_LED
+#ifndef LED_BUILTIN
   #if defined(ARDUINO_AVR_UNO) || defined(ARDUINO_AVR_NANO)
-    #define BUILTIN_LED 9
+    #define LED_BUILTIN 9
   #endif
   #ifdef ESP32
-    #define BUILTIN_LED 2
+    #define LED_BUILTIN 2
   #endif
 #endif
 
 void setupEspTools() {
-  pinMode(BUILTIN_LED, OUTPUT);
+  pinMode(LED_BUILTIN, OUTPUT);
   setLed(false);
 }
 
 void setLed(bool on) {
-  digitalWrite(BUILTIN_LED, !on);
+  digitalWrite(LED_BUILTIN, !on);
 }
 
 void blinkLed() {
