@@ -38,7 +38,7 @@
   #include "ESP8266mDNS.h"
 #endif
 
-#include "WiFiUDP.h"
+#include "WiFiUdp.h"
 #include "FS.h"
 #include "detail/RequestHandler.h"
 #include "detail/RequestHandlersImpl.h"

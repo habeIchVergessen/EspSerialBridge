@@ -30,7 +30,7 @@ public:
   EspDeviceConfig   getDeviceConfig(String deviceName);
   
 protected:
-  typedef struct __attribute__((packed)) ConfigList
+  struct ConfigList
   {
     String      name, value;
     ConfigList  *next;
