@@ -244,12 +244,7 @@ bool FlashATmega328::stkLoadAddress(uint16_t address, bool mapTo16BitAddress) {
     mAddress >>= 1;
   }
   
-  //uint8_t cmd[4] = { stkRequestLoadAddress, (mAddress & 0xFF), (mAddress >> 8), stkRequestCrcEOP };
-  uint8_t cmd[4];
-  cmd[0] = stkRequestLoadAddress;
-  cmd[1] = mAddress & 0xFF;
-  cmd[2] = mAddress >> 8;
-  cmd[3] = stkRequestCrcEOP;
+  uint8_t cmd[4] = { stkRequestLoadAddress, (mAddress & 0xFF), (mAddress >> 8), stkRequestCrcEOP };
   
   int writeSign = writeData(cmd, sizeof(cmd));
   delay(50);
