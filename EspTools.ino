@@ -56,13 +56,12 @@ String uptime() {
     result += String(espToolsUptimeDays) + "d, ";
   uptime %= 86400;
   uint8_t hours = uptime / 3600;
-  result += String(hours < 10 ? String("0") + hours : hours) + ":";
+  result += (hours < 10 ? "0" + String(hours) : String(hours)) + ":";
   uptime %= 3600;
   uint8_t minutes = uptime / 60;
-  result += String(minutes < 10 ? String("0") + minutes : minutes) + ".";
+  result += (minutes < 10 ? "0" + String(minutes) : String(minutes)) + ".";
   uptime %= 60;
-  result += String(uptime < 10 ? String("0") + uptime : uptime);
+  result += (uptime < 10 ? "0" + String(uptime) : String(uptime));
 
   return result;
 }
-
